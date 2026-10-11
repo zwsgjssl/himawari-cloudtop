@@ -1,17 +1,16 @@
 name: Himawari cloud top
 
-# ひまわりの観測の雲頂の高さ(FL)を日本付近の格子にして Cloudflare の KV に置く(tools/himawari_build.py)。
-#  - 30 分ごと(毎時 20 分と 50 分。NOAA に 00 分・30 分の観測が出るのを待ってから)。公開リポジトリなので Actions の時間の制限は無い。
-#  - 1 回あたり: NOAA から約 700MB を取って日本付近だけ切り出す(1〜2 分)。KV には 1 時刻 約 400KB、最新 4 時刻(6 時間で消える)。
-#  - GitHub は、公開リポジトリで 60 日なにも変更が無いと定期実行を止める。止まらないよう、最後の変更から 40 日たったら空のコミットをする(keepalive)。
+# ひまわりの観測の雲頂の高さ(FL)と雲の種類(v169)を日本付近の格子にして Cloudflare の KV に置く(tools/himawari_build.py)。
+#  - v168 起動は Cloudflare の Worker の定期実行(v169 10 分ごと、worker/hima.js の himaCron)から。GitHub の schedule は遅れや抜けが多いので使わない。
+#    手で動かすときは Actions → Himawari cloud top → Run workflow。
+#  - 1 回あたり: NOAA から雲頂(約 700MB)と種類のファイルを取って日本付近だけ切り出す(数分)。KV には 1 時刻 約 800KB、最新 6 時刻(6 時間で消える)。新しい観測が無ければすぐ終わる。
+#  - 公開リポジトリなので Actions の時間の制限は無い。手動・API の起動は 60 日の放置でも止まらないので keepalive は要らない。
 # 必要な Secrets(Settings → Secrets and variables → Actions): CF_API_TOKEN・CF_ACCOUNT_ID・CF_KV_WX_ID
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "20,50 * * * *"
 
 permissions:
-  contents: write   # keepalive の空のコミットだけに使う
+  contents: read
 
 concurrency:
   group: himawari
@@ -34,13 +33,3 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_KV_WX_ID: ${{ secrets.CF_KV_WX_ID }}
         run: python3 -u tools/himawari_build.py
-      - name: Keepalive
-        if: always()
-        run: |
-          last=$(git log -1 --format=%ct)
-          if [ $(( $(date +%s) - last )) -gt $((40*86400)) ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit --allow-empty -m "keepalive (定期実行を止めないため)"
-            git push
-          fi
