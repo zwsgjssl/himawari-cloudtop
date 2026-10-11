@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ひまわりの観測から雲頂の高さ(FL)と雲の種類を日本付近の格子にして Cloudflare の KV に置く(公開リポジトリの GitHub Actions。v169 10 分ごと、Cloudflare の Worker から起動)。
+# ひまわりの観測から雲頂の高さ(FL)・雲の種類・赤外の温度(v171)を日本付近の格子にして Cloudflare の KV に置く(公開リポジトリの GitHub Actions。v169 10 分ごと、Cloudflare の Worker から起動)。
 # v165 公開リポジトリ用にこのファイルだけで動くようにした(公開リポジトリの Actions は時間の制限なし)。
 #   このリポジトリには NOAA の公開データを切り出すこのプログラムと Actions の設定だけを置く(Map 本体・経路のデータは非公開リポジトリのまま)。
 #   Cloudflare の鍵は GitHub の Secrets(CF_API_TOKEN・CF_ACCOUNT_ID・CF_KV_WX_ID)。公開リポジトリでも Secrets は見えない。
@@ -208,18 +208,95 @@ def build_type(path, li, ci, ok):
         log("種類の値の数(まとめた後): " + " ".join(f"{a}:{b}" for a, b in zip(u.tolist(), n.tolist())))
         return out
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--dry-run", default="", help="KV に書かず、このフォルダに出す(試験用)")
-    ap.add_argument("--file", default="", help="ローカルの AHI-CHGT の nc を使う(試験用)")
-    ap.add_argument("--time", default="", help="--file の観測時刻 YYYYMMDDTHHMMZ")
-    ap.add_argument("--type-file", default="", help="ローカルの AHI-CPHS の nc(試験用)")
-    a = ap.parse_args()
-    kv = KV(a.dry_run or None)
-    old = kv.get("hima:meta"); old = json.loads(old) if old else None
-    have = {x["t"] for x in (old or {}).get("times", [])}
+# v171 ユーザー「(衛星の赤外を)jma から noaa に変更、温度で色もつけてほしい」
+#   ひまわりの観測そのもの(L1b、HSD 形式)の B13(10.4µm)の明るさ温度を、日本付近 0.025° の格子に。読み込みと温度への換算は satpy(ahi_hsd)。
+#   NOAA の noaa-himawari9 の AHI-L1b-FLDK/YYYY/MM/DD/HHMM/HS_H09_YYYYMMDD_HHMM_B13_FLDK_R20_S0110.DAT.bz2(全球を 10 の帯に分けたもの)のうち日本付近の帯だけ取る。
+#   KV hima/ir/<時刻> = gzip(uint8 [ny][nx]、南から北・西から東。値 = 温度(K) − 150(1〜254)、255 = 欠け・宇宙)。hima:meta の ir(新しい順に IR_KEEP 個)・ir_grid
+L1B = "AHI-L1b-FLDK"
+IR_D, IR_KEEP = 0.025, 3
+
+def ir_grid():
+    lats = LAT0 + IR_D * np.arange(int(round((LAT1 - LAT0) / IR_D)) + 1); lons = LON0 + IR_D * np.arange(int(round((LON1 - LON0) / IR_D)) + 1)
+    return lats, lons
+
+def ir_segments():
+    """日本付近が入っている帯(1〜10)。全球 5500 行を 550 行ずつ"""
+    lats, lons = ir_grid(); LO, LA = np.meshgrid(lons, lats); ln, cl = geos_linecol(LA, LO)
+    ok = np.isfinite(ln); return sorted({int(x) // 550 + 1 for x in (int(ln[ok].min()), int(ln[ok].max()))} | set(range(int(ln[ok].min()) // 550 + 1, int(ln[ok].max()) // 550 + 2)))
+
+def latest_ir(hours=2):
+    """日本付近の帯がそろった一番新しい観測の (時刻, [キー])"""
+    segs = ir_segments()
+    now = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None, second=0, microsecond=0); now = now.replace(minute=now.minute // 10 * 10)
+    for i in range(hours * 6):
+        t = now - dt.timedelta(minutes=10 * i); pre = f"{L1B}/{t:%Y/%m/%d/%H%M}/"
+        r = requests.get(S3 + "/", params={"list-type": "2", "prefix": pre}, headers=UA, timeout=60); r.raise_for_status()
+        ks = re.findall(r"<Key>([^<]*_B13_FLDK_R20_S(\d\d)10\.DAT(?:\.bz2)?)</Key>", r.text)
+        have = {int(sg): k for k, sg in ks}
+        if all(sg in have for sg in segs): return t, [have[sg] for sg in segs]
+    return None
+
+def build_ir(paths):
+    """HSD の B13 の帯 → 日本付近 0.025° の uint8(温度 − 150)"""
+    import bz2, warnings
+    from satpy import Scene
+    files = []
+    for p in paths:
+        if p.endswith(".bz2"):
+            q = p[:-4]
+            with bz2.open(p, "rb") as f, open(q, "wb") as g:
+                while True:
+                    b = f.read(1 << 22)
+                    if not b: break
+                    g.write(b)
+            os.remove(p); p = q
+        files.append(p)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        scn = Scene(reader="ahi_hsd", filenames=files); scn.load(["B13"])
+        d = scn["B13"]; area = d.attrs["area"]
+        lats, lons = ir_grid(); LO, LA = np.meshgrid(lons, lats)
+        col, row = area.get_array_indices_from_lonlat(LO, LA)
+        ok = ~np.ma.getmaskarray(col) & ~np.ma.getmaskarray(row)
+        col = np.ma.filled(col, 0).astype(int); row = np.ma.filled(row, 0).astype(int)
+        r0, r1, c0, c1 = int(row[ok].min()), int(row[ok].max()) + 1, int(col[ok].min()), int(col[ok].max()) + 1
+        log(f"赤外 B13: 全体 {d.shape}、日本付近 = 行 {r0}〜{r1}・列 {c0}〜{c1}、衛星 {d.attrs.get('platform_name')} {d.attrs.get('start_time')}")
+        sub = np.asarray(d[r0:r1, c0:c1].values, dtype="f4")
+    K = sub[np.clip(row - r0, 0, r1 - r0 - 1), np.clip(col - c0, 0, c1 - c0 - 1)]
+    out = np.where(ok & np.isfinite(K), np.clip(np.rint(K - 150), 1, 254), 255).astype("u1")
+    q = K[ok & np.isfinite(K)]
+    if q.size < 0.5 * K.size: raise RuntimeError(f"赤外の値が足りません({q.size}/{K.size})")
+    p = np.percentile(q, [1, 50, 99]); log(f"赤外の温度 K 1/50/99%: {p[0]:.0f}/{p[1]:.0f}/{p[2]:.0f}")
+    if not (200 < p[1] < 320): raise RuntimeError("赤外の温度がおかしい")
+    return out, {"lat0": LAT0, "dlat": IR_D, "ny": len(lats), "lon0": LON0, "dlon": IR_D, "nx": len(lons)}
+
+def do_ir(kv, meta, ir_files=None, ir_time=None):
+    """赤外の最新を KV に。meta(hima:meta の dict)の ir・ir_grid を書き換える。変えたら True"""
+    import gzip
     t0 = time.time()
-    typ = None
+    if ir_files: tt, paths = ir_time, list(ir_files); tmp = None
+    else:
+        f = latest_ir()
+        if not f: raise RuntimeError("赤外(L1b B13)の日本付近の帯が直近 2 時間にそろっていません")
+        tt, keys = f
+        if any(x["t"] == f"{tt:%Y-%m-%dT%H:%MZ}" for x in meta.get("ir", [])): log(f"赤外 {tt:%H:%MZ} はもうあります"); return False
+        tmp = tempfile.mkdtemp(); paths = []
+        for k in keys:
+            p = os.path.join(tmp, k.split("/")[-1]); n = download(k, p, parts=4); paths.append(p)
+        log(f"赤外 取得 {len(keys)} 個 {time.time()-t0:.0f}秒")
+    try: arr, grid = build_ir(paths)
+    finally:
+        if tmp: import shutil; shutil.rmtree(tmp, ignore_errors=True)
+    t = f"{tt:%Y-%m-%dT%H:%MZ}"; k = f"hima/ir/{tt:%Y%m%dT%H%MZ}"
+    z = gzip.compress(arr.tobytes(), 6); kv.put(k, z, TTL)
+    meta["ir"] = sorted([{"t": t, "key": k}] + [x for x in meta.get("ir", []) if x["t"] != t], key=lambda x: x["t"], reverse=True)[:IR_KEEP]
+    meta["ir_grid"] = grid; meta["ir_enc"] = "gzip(uint8 温度K−150、255 = 欠け)"
+    log(f"赤外 できました: {t}、{len(z)/1e3:.0f}KB(gzip)、{time.time()-t0:.0f}秒")
+    return True
+
+def do_l2(kv, meta, a):
+    """雲頂・雲の種類の最新を KV に。変えたら True"""
+    t0 = time.time(); typ = None
     def add_type(p, pos):
         nonlocal typ
         try: typ = build_type(p, *pos)
@@ -229,10 +306,10 @@ def main():
         if a.type_file: add_type(a.type_file, pos)
     else:
         fs = latest_files()
-        if not fs: raise SystemExit("ひまわりの雲頂のファイルが直近 6 時間に見つかりません(NOAA の遅れ・止まり)")
+        if not fs: raise RuntimeError("ひまわりの雲頂のファイルが直近 6 時間に見つかりません(NOAA の遅れ・止まり)")
         tt, key, tkey = fs
-        old_t = {x["t"]: x for x in (old or {}).get("times", [])}.get(f"{tt:%Y-%m-%dT%H:%MZ}")
-        if old_t and (old_t.get("type") or not tkey): log(f"{tt:%H:%MZ} はもうあります。何もしません"); return
+        old_t = {x["t"]: x for x in meta.get("times", [])}.get(f"{tt:%Y-%m-%dT%H:%MZ}")
+        if old_t and (old_t.get("type") or not tkey): log(f"{tt:%H:%MZ} はもうあります。何もしません"); return False
         with tempfile.TemporaryDirectory() as tmp:
             p = os.path.join(tmp, "chgt.nc"); n = download(key, p)
             log(f"取得 {key.split('/')[-1]} {n/1e6:.0f}MB {time.time()-t0:.0f}秒")
@@ -244,12 +321,36 @@ def main():
             else: log("雲の種類(CPHS)はまだ出ていないので、雲頂だけ置きます")
     t = f"{tt:%Y-%m-%dT%H:%MZ}"; k = f"hima/{tt:%Y%m%dT%H%MZ}"
     kv.put(k, arr.tobytes() + (typ.tobytes() if typ is not None else b""), TTL)
-    times = [{"t": t, "key": k, "type": typ is not None}] + [x for x in (old or {}).get("times", []) if x["t"] != t]
-    times = sorted(times, key=lambda x: x["t"], reverse=True)[:KEEP]
+    times = [{"t": t, "key": k, "type": typ is not None}] + [x for x in meta.get("times", []) if x["t"] != t]
+    meta["times"] = sorted(times, key=lambda x: x["t"], reverse=True)[:KEEP]
     # layers は一番新しい回(Map が取るのは times[0])のもの
-    kv.put("hima:meta", json.dumps({"grid": grid, "layers": ["fl", "type"] if typ is not None else ["fl"], "types": CT_CLASSES, "times": times, "src": src, "enc": "uint8 FL/2、0 = 雲なし、255 = 欠け",
-                                    "attribution": "Himawari-9 / NOAA Enterprise Cloud Height (AHI-CHGT, NOAA Open Data Dissemination)"}, ensure_ascii=False).encode("utf-8"))
+    meta.update({"grid": grid, "layers": ["fl", "type"] if typ is not None else ["fl"], "types": CT_CLASSES, "src": src, "enc": "uint8 FL/2、0 = 雲なし、255 = 欠け",
+                 "attribution": "Himawari-9 / NOAA (AHI L1b, Enterprise Cloud Height・Phase/Type), NOAA Open Data Dissemination"})
     log(f"できました: {t}、{(arr.nbytes + (typ.nbytes if typ is not None else 0))/1e3:.0f}KB" + ("(雲頂 + 種類)" if typ is not None else "(雲頂だけ)") + f"、{time.time()-t0:.0f}秒")
+    return True
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--dry-run", default="", help="KV に書かず、このフォルダに出す(試験用)")
+    ap.add_argument("--file", default="", help="ローカルの AHI-CHGT の nc を使う(試験用)")
+    ap.add_argument("--time", default="", help="--file・--ir-files の観測時刻 YYYYMMDDTHHMMZ")
+    ap.add_argument("--type-file", default="", help="ローカルの AHI-CPHS の nc(試験用)")
+    ap.add_argument("--ir-files", nargs="*", default=None, help="ローカルの HSD の B13 の帯(試験用)")
+    ap.add_argument("--only", default="", help="l2 か ir だけ(試験用)")
+    a = ap.parse_args()
+    kv = KV(a.dry_run or None)
+    old = kv.get("hima:meta"); meta = json.loads(old) if old else {}
+    errs, changed = [], False
+    # v171 雲頂・種類(L2)と赤外(L1b)は別々に。片方が失敗してももう片方は置く
+    if a.only != "ir":
+        try: changed |= do_l2(kv, meta, a)
+        except Exception as e: errs.append(f"雲頂: {e}"); log(f"雲頂は作れませんでした: {e}")
+    if a.only != "l2" and (a.ir_files is None or a.ir_files):
+        try: changed |= do_ir(kv, meta, a.ir_files, dt.datetime.strptime(a.time, "%Y%m%dT%H%MZ") if a.ir_files else None)
+        except Exception as e: errs.append(f"赤外: {e}"); log(f"赤外は作れませんでした: {e}")
+    if changed and (meta.get("times") or meta.get("ir")):
+        kv.put("hima:meta", json.dumps(meta, ensure_ascii=False).encode("utf-8"))
+    if errs: raise SystemExit("うまくいかなかったもの: " + " / ".join(errs))
 
 if __name__ == "__main__":
     main()
