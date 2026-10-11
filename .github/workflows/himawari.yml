@@ -1,6 +1,6 @@
 name: Himawari cloud top
 
-# ひまわりの観測の雲頂の高さ(FL)と雲の種類(v169)を日本付近の格子にして Cloudflare の KV に置く(tools/himawari_build.py)。
+# ひまわりの観測の雲頂の高さ(FL)・雲の種類(v169)・赤外の温度(v171)を日本付近の格子にして Cloudflare の KV に置く(tools/himawari_build.py)。
 #  - v168 起動は Cloudflare の Worker の定期実行(v169 10 分ごと、worker/hima.js の himaCron)から。GitHub の schedule は遅れや抜けが多いので使わない。
 #    手で動かすときは Actions → Himawari cloud top → Run workflow。
 #  - 1 回あたり: NOAA から雲頂(約 700MB)と種類のファイルを取って日本付近だけ切り出す(数分)。KV には 1 時刻 約 800KB、最新 6 時刻(6 時間で消える)。新しい観測が無ければすぐ終わる。
@@ -26,7 +26,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        run: pip install --quiet numpy h5py requests
+        run: pip install --quiet numpy h5py requests satpy==0.60.0 pyresample==1.35.0   # v171 satpy = 赤外(HSD)の読み込み
       - name: Build and upload
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
