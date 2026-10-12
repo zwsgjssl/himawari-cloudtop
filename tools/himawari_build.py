@@ -168,9 +168,12 @@ def build(path):
             if isinstance(fm, bytes): fm = fm.decode()
             u, n = np.unique(q[ok & np.isfinite(sub)], return_counts=True)
             log(f"品質フラグ {vq}: 値の数(雲のある所) " + " ".join(f"{a}:{b}" for a, b in zip(u.tolist(), n.tolist()))[:400] + (f" / 意味 {list(np.asarray(fv).ravel())} {fm}" if fv is not None else " / 意味の説明なし"))
+            # NOAA の説明(Enterprise ACHA の Read-me): 0 = 成功、1 = ほぼ成功、2 = 試みたが失敗、3 = 試みていない → 2・3 を外す。
+            #   ファイルに意味(flag_meanings)が書いてあればそれで決める(fail・no retrieval など)。無ければこの決まりで 2・3
             if fv is not None and fm:
                 drop = [int(x) for x, m in zip(np.asarray(fv).ravel(), str(fm).split()) if re.search(r"fail|invalid|bad|no_?retriev|not_?attempt|not_?converg|missing|fill", m, re.I)]
-                if drop: bad |= np.isin(q, drop); log(f"品質フラグで外す値: {drop}(雲のある所の {np.mean(np.isin(q, drop)[ok & np.isfinite(sub)])*100:.1f}%)")
+            else: drop = [2, 3]
+            if drop: bad |= np.isin(q, drop); log(f"品質フラグで外す値: {drop}(雲のある所の {np.mean(np.isin(q, drop)[ok & np.isfinite(sub)])*100:.1f}%)")
         else: log("品質フラグ(CloudHgtQF)はありません")
         hi = np.isfinite(sub) & (sub > 500); log(f"FL500 より上(外す): 雲のある所の {np.mean(hi[ok & np.isfinite(sub)])*100 if np.any(ok & np.isfinite(sub)) else 0:.1f}%")
         bad |= hi
@@ -184,7 +187,10 @@ def build(path):
 # v169 雲の種類。番号 = Map の CT_TBL と同じ並び(1 から)
 CT_CLASSES = ["fog", "water", "supercooled", "mixed", "opaque_ice", "cirrus", "overlap", "overshoot", "other"]
 # ファイルに flag_meanings が無いときの想定(NOAA Enterprise の雲の種類。未確認なのでログに値の数を出す)
-CT_DEFAULT = ["clear", "probably_clear", "fog", "water", "supercooled_water", "mixed", "opaque_ice", "cirrus", "overlapping", "overshooting", "unknown", "dust", "smoke", "fire"]
+# v188 実際の AHI-CPHS の CloudType は 0・2〜7 だけで flag_meanings も無かった(2026-10-12 05:30Z のログ)。
+#   NOAA の説明(GOES-R の Cloud Type: 暖かい水・過冷却の水・混じり・厚い氷・巻雲・多層 の 6 つ)と数の多さ(2 と 6 が多い)から
+#   0 = 晴れ、2 = 水、3 = 過冷却の水、4 = 混じり、5 = 厚い氷、6 = 巻雲(薄い氷)、7 = 多層 と判断(前の想定は 1 つずれていて、巻雲を厚い氷 = Dense にしていた)
+CT_DEFAULT = ["clear", "probably_clear", "water", "supercooled_water", "mixed", "opaque_ice", "cirrus", "overlapping", "unknown", "unknown", "unknown", "unknown", "unknown", "unknown"]
 def ct_class(name):
     n = name.lower()
     if "clear" in n: return 0
