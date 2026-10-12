@@ -14,6 +14,10 @@
 #   値 = FL ÷ 2(1〜250 = FL2〜500)、0 = 雲なし、255 = 欠け(衛星の外・データなし)。6 時間で消える。
 #   v169 その後ろに同じ形でもう 1 枚、雲の種類(AHI-CPHS の CloudType を CT_CLASSES の番号に。0 = 雲なし、255 = 欠け)。取れなければ付けない。
 #   hima:meta = { grid, layers:["fl"(, "type")], types:CT_CLASSES, times:[{ t, key }](新しい順に KEEP 個まで), src } を最後に書く
+# v190 ユーザー「KV の無料枠(書き込み 1 日 1,000 回)の 50% のメール」→ 1 回に 3 つ(雲頂・赤外・meta)書いていたのを、hima:latest の 1 つにまとめた。
+#   hima:latest = [見出しの長さ 4 バイト(ビッグエンディアン)][見出し JSON][中身]。見出し = 前の hima:meta と同じ形(times・ir は最新 1 つずつ)
+#     + parts:{ L:[位置, 長さ](雲頂 + 種類、前の hima/<時刻> と同じ中身), I:[位置, 長さ](赤外の gzip、前の hima/ir/<時刻> と同じ中身) }
+#   片方が作れなかった回は、前の hima:latest のその部分をそのまま使う。何も新しくなければ書かない。worker の /api/hima が見出しと部分を返す(Map は変更なし)
 # 環境変数: CF_API_TOKEN・CF_ACCOUNT_ID・CF_KV_WX_ID(ukmo.yml と同じ)。試験用: HIMA_S3_BASE、--dry-run フォルダ、--file ローカルの nc
 import argparse, datetime as dt, json, math, os, re, sys, tempfile, time
 from concurrent.futures import ThreadPoolExecutor
@@ -53,6 +57,19 @@ S3 = os.environ.get("HIMA_S3_BASE", "https://noaa-himawari9.s3.amazonaws.com").r
 PREFIX = "AHI-L2-FLDK-Clouds"
 LAT0, LAT1, LON0, LON1, D = 20.0, 50.0, 118.0, 152.0, 0.05
 TTL = 6 * 3600
+LATEST = "hima:latest"   # v190
+
+def pack(head, parts):
+    """見出し(dict)と部分(名前 → bytes)を hima:latest の 1 つの値に"""
+    offs, body = {}, bytearray()
+    for n, b in parts.items(): offs[n] = [len(body), len(b)]; body += b
+    hj = json.dumps(dict(head, parts=offs), ensure_ascii=False).encode("utf-8")
+    return len(hj).to_bytes(4, "big") + hj + bytes(body)
+
+def unpack(blob):
+    n = int.from_bytes(blob[:4], "big"); head = json.loads(blob[4:4 + n].decode("utf-8")); body = blob[4 + n:]
+    parts = {k: body[o:o + l] for k, (o, l) in head.pop("parts", {}).items()}
+    return head, parts
 KEEP = 6   # v169 10 分ごとの 6 つ(1 時間ぶん)
 SUB_LON, CFAC, LFAC, COFF, LOFF = 140.7, 20466275, 20466275, 2750.5, 2750.5
 
@@ -292,7 +309,7 @@ def build_ir(paths):
     if not (200 < p[1] < 320): raise RuntimeError("赤外の温度がおかしい")
     return out, {"lat0": LAT0, "dlat": IR_D, "ny": len(lats), "lon0": LON0, "dlon": IR_D, "nx": len(lons)}
 
-def do_ir(kv, meta, ir_files=None, ir_time=None):
+def do_ir(parts, meta, ir_files=None, ir_time=None):
     """赤外の最新を KV に。meta(hima:meta の dict)の ir・ir_grid を書き換える。変えたら True"""
     import gzip
     t0 = time.time()
@@ -310,13 +327,13 @@ def do_ir(kv, meta, ir_files=None, ir_time=None):
     finally:
         if tmp: import shutil; shutil.rmtree(tmp, ignore_errors=True)
     t = f"{tt:%Y-%m-%dT%H:%MZ}"; k = f"hima/ir/{tt:%Y%m%dT%H%MZ}"
-    z = gzip.compress(arr.tobytes(), 6); kv.put(k, z, TTL)
-    meta["ir"] = sorted([{"t": t, "key": k}] + [x for x in meta.get("ir", []) if x["t"] != t], key=lambda x: x["t"], reverse=True)[:IR_KEEP]
+    z = gzip.compress(arr.tobytes(), 6); parts["I"] = z
+    meta["ir"] = [{"t": t, "key": k}]   # v190 最新だけ(hima:latest の部分 I)
     meta["ir_grid"] = grid; meta["ir_enc"] = "gzip(uint8 温度K−150、255 = 欠け)"
     log(f"赤外 できました: {t}、{len(z)/1e3:.0f}KB(gzip)、{time.time()-t0:.0f}秒")
     return True
 
-def do_l2(kv, meta, a):
+def do_l2(parts, meta, a):
     """雲頂・雲の種類の最新を KV に。変えたら True"""
     t0 = time.time(); typ = None
     def add_type(p, pos):
@@ -342,9 +359,8 @@ def do_l2(kv, meta, a):
                 add_type(p2, pos)
             else: log("雲の種類(CPHS)はまだ出ていないので、雲頂だけ置きます")
     t = f"{tt:%Y-%m-%dT%H:%MZ}"; k = f"hima/{tt:%Y%m%dT%H%MZ}"
-    kv.put(k, arr.tobytes() + (typ.tobytes() if typ is not None else b""), TTL)
-    times = [{"t": t, "key": k, "type": typ is not None}] + [x for x in meta.get("times", []) if x["t"] != t]
-    meta["times"] = sorted(times, key=lambda x: x["t"], reverse=True)[:KEEP]
+    parts["L"] = arr.tobytes() + (typ.tobytes() if typ is not None else b"")
+    meta["times"] = [{"t": t, "key": k, "type": typ is not None}]   # v190 最新だけ(hima:latest の部分 L)
     # layers は一番新しい回(Map が取るのは times[0])のもの
     meta.update({"grid": grid, "layers": ["fl", "type"] if typ is not None else ["fl"], "types": CT_CLASSES, "src": src, "enc": "uint8 FL/2、0 = 雲なし、255 = 欠け",
                  "attribution": "Himawari-9 / NOAA (AHI L1b, Enterprise Cloud Height・Phase/Type), NOAA Open Data Dissemination"})
@@ -361,17 +377,20 @@ def main():
     ap.add_argument("--only", default="", help="l2 か ir だけ(試験用)")
     a = ap.parse_args()
     kv = KV(a.dry_run or None)
-    old = kv.get("hima:meta"); meta = json.loads(old) if old else {}
+    old = kv.get(LATEST); meta, parts = unpack(old) if old else ({}, {})
+    if "L" not in parts: meta["times"] = []   # 部分が無いのに一覧だけある、を避ける
+    if "I" not in parts: meta["ir"] = []
     errs, changed = [], False
     # v171 雲頂・種類(L2)と赤外(L1b)は別々に。片方が失敗してももう片方は置く
     if a.only != "ir":
-        try: changed |= do_l2(kv, meta, a)
+        try: changed |= do_l2(parts, meta, a)
         except Exception as e: errs.append(f"雲頂: {e}"); log(f"雲頂は作れませんでした: {e}")
     if a.only != "l2" and (a.ir_files is None or a.ir_files):
-        try: changed |= do_ir(kv, meta, a.ir_files, dt.datetime.strptime(a.time, "%Y%m%dT%H%MZ") if a.ir_files else None)
+        try: changed |= do_ir(parts, meta, a.ir_files, dt.datetime.strptime(a.time, "%Y%m%dT%H%MZ") if a.ir_files else None)
         except Exception as e: errs.append(f"赤外: {e}"); log(f"赤外は作れませんでした: {e}")
-    if changed and (meta.get("times") or meta.get("ir")):
-        kv.put("hima:meta", json.dumps(meta, ensure_ascii=False).encode("utf-8"))
+    if changed and parts:   # v190 書くのは 1 回だけ(期限なし。止まったら最後の回が残る)
+        blob = pack(meta, parts); kv.put(LATEST, blob)
+        log(f"KV {LATEST} に書きました({len(blob)/1e6:.2f}MB、部分 {', '.join(parts)})")
     if errs: raise SystemExit("うまくいかなかったもの: " + " / ".join(errs))
 
 if __name__ == "__main__":
