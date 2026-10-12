@@ -158,7 +158,23 @@ def build(path):
             FL = Hm * 3.28084 / 100; src = f"{vh}(高さ → ft。FL とは少しずれる)"
         # 雲なし: 雲頂の値が無い(NaN)所。衛星の外は 255
         sub = FL[np.clip(li - r0, 0, r1 - r0 - 1), np.clip(ci - c0, 0, c1 - c0 - 1)]
-        out = np.where(~ok, 255, np.where(np.isfinite(sub), np.clip(np.rint(sub / 2), 1, 250), 0)).astype("u1")
+        # v187 ユーザー「赤外ではそんなに冷たくないのに雲頂 FL500 が結構ある」→ (1) 品質フラグ(CloudHgtQF)で計算に失敗した所は「欠け」に
+        #   (2) FL500 より上(約 115hPa より上。日本付近の圏界面よりずっと上)は計算の外れとして「欠け」に(前は FL500 に張り付けていた)
+        bad = np.zeros(sub.shape, bool)
+        vq = pick(names, r"^CloudHgtQF$", r"Hgt.*QF", r"QF$")
+        if vq and h5[vq].shape == shape:
+            v = h5[vq]; raw = v[r0:r1, c0:c1]; q = raw[np.clip(li - r0, 0, r1 - r0 - 1), np.clip(ci - c0, 0, c1 - c0 - 1)].astype("i8")
+            fv, fm = v.attrs.get("flag_values"), v.attrs.get("flag_meanings")
+            if isinstance(fm, bytes): fm = fm.decode()
+            u, n = np.unique(q[ok & np.isfinite(sub)], return_counts=True)
+            log(f"品質フラグ {vq}: 値の数(雲のある所) " + " ".join(f"{a}:{b}" for a, b in zip(u.tolist(), n.tolist()))[:400] + (f" / 意味 {list(np.asarray(fv).ravel())} {fm}" if fv is not None else " / 意味の説明なし"))
+            if fv is not None and fm:
+                drop = [int(x) for x, m in zip(np.asarray(fv).ravel(), str(fm).split()) if re.search(r"fail|invalid|bad|no_?retriev|not_?attempt|not_?converg|missing|fill", m, re.I)]
+                if drop: bad |= np.isin(q, drop); log(f"品質フラグで外す値: {drop}(雲のある所の {np.mean(np.isin(q, drop)[ok & np.isfinite(sub)])*100:.1f}%)")
+        else: log("品質フラグ(CloudHgtQF)はありません")
+        hi = np.isfinite(sub) & (sub > 500); log(f"FL500 より上(外す): 雲のある所の {np.mean(hi[ok & np.isfinite(sub)])*100 if np.any(ok & np.isfinite(sub)) else 0:.1f}%")
+        bad |= hi
+        out = np.where(~ok | (bad & np.isfinite(sub)), 255, np.where(np.isfinite(sub), np.clip(np.rint(sub / 2), 1, 250), 0)).astype("u1")
         cov = float(np.mean((out > 0) & (out < 255)))
         q = sub[np.isfinite(sub)]
         log(f"雲頂 {src}: 雲のある割合 {cov*100:.0f}%" + (f"、FL 50/90/99% {np.percentile(q, 50):.0f}/{np.percentile(q, 90):.0f}/{np.percentile(q, 99):.0f}" if q.size else ""))
