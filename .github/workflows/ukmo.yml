@@ -1,0 +1,47 @@
+name: UKMET upper air
+
+# UKMET(Met Office 全球 10km)の 1000〜150hPa(25 層)の気温・風・湿度と圏界面を、日本付近だけ切り出して Cloudflare の KV に置く(tools/ukmo_build.py)。
+#  - v190 非公開リポジトリから公開リポジトリへ移した(公開リポジトリは Actions の時間の制限なし)。中身は前と同じ。
+#  - 起動: Cloudflare の Worker の定期実行(worker/ukmo.js の ukmoCron)が、新しい回が出そろったら GitHub の API で起動する(workflow_dispatch)。
+#    GitHub の定期実行(schedule)は遅れる・飛ばされることがあるので、下の schedule は予備だけ。手で動かすときは Actions → UKMET upper air → Run workflow。
+#  - KV にもう同じ回があれば何もせずに終わる(予備の回や二重の起動で無駄に動かない)。
+#  - 1 回あたり: Met Office から約 4GB を取って切り出す(数分)。
+# 必要な Secrets(Settings → Secrets and variables → Actions。ひまわりと同じ): CF_API_TOKEN・CF_ACCOUNT_ID・CF_KV_WX_ID
+on:
+  workflow_dispatch:
+    inputs:
+      run:
+        description: "Met Office の回(例 20261010T0000Z)。空なら揃っている一番新しい回"
+        required: false
+        default: ""
+      force:
+        description: "KV にもう同じ回があっても作り直す"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "41 */6 * * *"   # 予備(Cloudflare から起動されなかったとき)
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ukmo
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install --quiet numpy xarray h5netcdf h5py requests
+      - name: Build and upload
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_KV_WX_ID: ${{ secrets.CF_KV_WX_ID }}
+        run: python3 -u tools/ukmo_build.py --run "${{ github.event.inputs.run }}" ${{ github.event.inputs.force == 'true' && '--force' || '' }}
