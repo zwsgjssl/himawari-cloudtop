@@ -56,7 +56,12 @@ CHARTS = [
     ("fupa302", "fupa302", "FUPA302 300hPa 24時間予想", 24),
     ("fupa502", "fupa502", "FUPA502 500hPa 24時間予想", 24),
     ("fxjp854", "fxjp854", "FXJP854 850hPa 相当温位・風 12〜48時間予想", -1),
+    # v203 ユーザー「AXJP も追加」→ 高層断面図の解析(東経 130 度・140 度)。2 枚を縦につないで 1 枚に(社内の表示「AXJP130/140」と同じ)
+    ("axjp", ("axjp130", "axjp140"), "AXJP130/140 高層断面図 解析(130°E・140°E)", 0),
 ]
+# v203 ユーザー「社内のシステムの表示順が ASAS FSAS AUPQ78 AUPQ35 AUPN30 AUPA25 AUPA20 FUPA502 FUPA302 FUPA252 AXJP130/140 FXJP106/112 だから、その順番で」
+#   (FXJP854 は社内の一覧に無いので最後)
+ORDER = ["spas", "fsas24", "aupq78", "aupq35", "aupn30", "aupa25", "aupa20", "fupa502", "fupa302", "fupa252", "axjp", "fxjp106", "fxjp854"]
 
 def log(*a): print(time.strftime("%H:%M:%S"), *a, flush=True)
 
@@ -316,15 +321,29 @@ def main():
         charts.append(x[0])
         if x[1] is not None: parts["fxjp106"] = x[1]; changed = True
     for cid, name, title, fh in CHARTS:
-        f = lm_of(name)
-        if not f:
+        names = list(name) if isinstance(name, tuple) else [name]
+        fs = [x for x in (lm_of(n) for n in names) if x]
+        if not fs:
             if cid in have: charts.append(have[cid])
             continue
+        f = max(fs, key=lambda x: x[2])   # 回は一番新しい物で
         url, lm, t, run = f
+        lm = " | ".join(x[1] for x in fs) if len(names) > 1 else lm
         if cid in have and have[cid].get("lm") == lm: charts.append(have[cid]); continue
         try:
-            r = requests.get(url, headers=UA, timeout=120); r.raise_for_status()
-            png, w, h = render(r.content)
+            if len(names) == 1:
+                r = requests.get(url, headers=UA, timeout=120); r.raise_for_status()
+                png, w, h = render(r.content)
+            else:   # v203 何枚かを縦につなぐ(AXJP130・140)
+                from PIL import Image
+                ims = []
+                for x in fs:
+                    r = requests.get(x[0], headers=UA, timeout=120); r.raise_for_status()
+                    ims.append(Image.open(io.BytesIO(render(r.content)[0])).convert("L"))
+                w = max(i.width for i in ims); h = sum(i.height for i in ims)
+                cv = Image.new("L", (w, h), 255); y = 0
+                for i in ims: cv.paste(i, ((w - i.width) // 2, y)); y += i.height
+                png = gray4(cv)
         except Exception as e:
             log(f"{cid}: 取れませんでした {e}")
             if cid in have: charts.append(have[cid])
@@ -333,6 +352,7 @@ def main():
         parts[cid] = png; changed = True
         charts.append({"id": cid, "grp": "upper", "title": title, "lm": lm, "base": base.strftime("%Y-%m-%dT%H:%MZ"), "valid": valid_text(base, fh), "w": w, "h": h, "bytes": len(png)})
         log(f"{cid}: {lm} → {w}×{h} {len(png)/1e3:.0f}KB({charts[-1]['valid']})")
+    charts.sort(key=lambda c: ORDER.index(c["id"]) if c["id"] in ORDER else len(ORDER))   # v203 社内の表示順
     for k in list(parts):
         if not any(c["id"] == k for c in charts): parts.pop(k)
     # v201 答え合わせの資料。図か資料が前の nwp-img と違えば、フォルダに出し直す
