@@ -36,7 +36,11 @@ LATEST = "nwp:latest"
 WM_BASE = os.environ.get("WM_BASE", "https://www.jma.go.jp/bosai/weather_map/data/").rstrip("/") + "/"
 AIR_BASE = os.environ.get("AIRINFO_BASE", "https://www.data.jma.go.jp/airinfo/data/pict/").rstrip("/") + "/"
 # 地上天気図(list.json の near_monochrome の now・ft24・ft48)
-SFC = [("spas", "now", "SPAS 地上 実況(日本周辺)", 0), ("fsas24", "ft24", "FSAS24 地上 24時間予想", 24), ("fsas48", "ft48", "FSAS48 地上 48時間予想", 48)]
+# v202 ユーザー「48 時間先まで見なくていいよ!」→ FSAS48 はやめた
+SFC = [("spas", "now", "SPAS 地上 実況(日本周辺)", 0), ("fsas24", "ft24", "FSAS24 地上 24時間予想", 24)]
+# v202 ユーザー「FXJP も入れようか」→ 国内航空路 6・12 時間予想断面図(airinfo の fxjp106_<初期時刻>.png。3 時間ごと、初期時刻の約 2.5 時間後に出る)。
+#   8 つの初期時刻のうち更新(Last-Modified)が一番新しい物。色付きの図なのでそのまま(灰色にしない)
+XS_HOURS = ("00", "03", "06", "09", "12", "15", "18", "21")
 # 答え合わせの資料(気象庁の予報官が作った物)
 REFS = [("fbjp", "fbjp/fbjp.png", "FBJP 国内悪天予想図"), ("cmnt_air", "ajpn_cmnt/qyya82.png", "全国航空気象解説報(国内空域)"),
         ("cmnt_fir", "ajpn_cmnt/qyya83.png", "全国航空気象解説報(福岡FIR)")]
@@ -149,6 +153,33 @@ def sfc_charts(have):
         log(f"{cid}: {name} → {im.width}×{im.height} {len(b)/1e3:.0f}KB({valid})")
         out.append((c, b))
     return out
+
+def xs_chart(have):
+    """国内航空路の断面図(FXJP106)の最新。(chart, png か None) か None"""
+    best = None
+    for hh in XS_HOURS:
+        url = f"{AIR_BASE}nwp/fxjp106_{hh}.png"
+        try: r = requests.head(url, headers=UA, timeout=30, allow_redirects=True)
+        except requests.RequestException as e: log(f"  fxjp106_{hh}: {e}"); continue
+        lm = r.headers.get("Last-Modified")
+        if not r.ok or not lm: continue
+        t = email.utils.parsedate_to_datetime(lm).astimezone(dt.timezone.utc).replace(tzinfo=None)
+        if not best or t > best[2]: best = (url, lm, t, hh)
+    if not best: log("fxjp106: 見つかりません"); return (have["fxjp106"], None) if "fxjp106" in have else None
+    url, lm, t, hh = best
+    if "fxjp106" in have and have["fxjp106"].get("lm") == lm: return have["fxjp106"], None
+    try:
+        r = requests.get(url, headers=UA, timeout=60); r.raise_for_status()
+        if not r.content.startswith(b"\x89PNG"): raise ValueError("PNG ではありません")
+    except Exception as e:
+        log(f"fxjp106: 取れませんでした {e}"); return (have["fxjp106"], None) if "fxjp106" in have else None
+    from PIL import Image
+    im = Image.open(io.BytesIO(r.content))
+    base = base_of(t, hh); f = lambda x: x.strftime("%d日%H") + "Z"
+    c = {"id": "fxjp106", "grp": "xs", "title": "FXJP106 国内航空路 6・12時間予想断面図", "lm": lm, "base": base.strftime("%Y-%m-%dT%H:%MZ"),
+         "valid": f"初期 {f(base)}(+6h {f(base + dt.timedelta(hours=6))}・+12h {f(base + dt.timedelta(hours=12))})", "w": im.width, "h": im.height, "bytes": len(r.content)}
+    log(f"fxjp106: {lm} → {im.width}×{im.height} {len(r.content)/1e3:.0f}KB({c['valid']})")
+    return c, r.content
 
 def get_refs():
     """答え合わせの資料。[(ref, png)](取れなかった物は入れない)"""
@@ -279,6 +310,11 @@ def main():
     for c, b in sfc_charts(have):
         charts.append(c)
         if b is not None: parts[c["id"]] = b; changed = True
+    # v202 国内航空路の断面図
+    x = xs_chart(have)
+    if x:
+        charts.append(x[0])
+        if x[1] is not None: parts["fxjp106"] = x[1]; changed = True
     for cid, name, title, fh in CHARTS:
         f = lm_of(name)
         if not f:
