@@ -45,7 +45,9 @@ jobs:
           ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
         run: |
           EXTRA=""; git ls-remote --exit-code origin nwp-img >/dev/null 2>&1 || EXTRA="--img-always"   # ブランチがまだ無ければ今の図で作る
-          python3 -u tools/nwp_build.py --img-dir nwp_img $EXTRA ${{ github.event.inputs.force_ai == 'true' && '--force-ai' || '' }}
+          # v201 前の nwp-img の charts.json(図・答え合わせの資料が変わったかを比べる)
+          if [ -z "$EXTRA" ] && git fetch -q --depth 1 origin +refs/heads/nwp-img:refs/remotes/origin/nwp-img 2>/dev/null; then git show origin/nwp-img:charts.json > /tmp/prev_charts.json 2>/dev/null || true; fi
+          python3 -u tools/nwp_build.py --img-dir nwp_img --prev /tmp/prev_charts.json $EXTRA ${{ github.event.inputs.force_ai == 'true' && '--force-ai' || '' }}
       - name: Publish images for the scheduled Claude analysis
         if: ${{ hashFiles('nwp_img/charts.json') != '' }}
         run: |

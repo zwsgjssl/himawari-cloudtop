@@ -19,6 +19,12 @@
 #   (2) Claude のスケジュール実行が 1 日 2 回 nwp-img の図を読み、main の nwp_ai/ai.json に解説を書く(高層天気図ごとの解析 + 全体の総括)
 #   (3) 次の実行でこのスクリプトが nwp_ai/ai.json を読み、図と同じ回の解説なら KV の見出しの ai に入れる
 #   ANTHROPIC_API_KEY があるときの Claude API の道も残す(ai.json が無い・古いときだけ使う)
+# v201 ユーザー「どうせだから(地上の)ASAS と FSAS もいれて総合的に解析しよう。全国航空気象解説報や FBJP を答え合わせに使うのはどう?」
+#   (1) 地上天気図: 気象庁 bosai の天気図(日本周辺・白黒。Map が地図に重ねているのと同じ物)の最新の実況(SPAS)・24 時間予想(FSAS24)・48 時間予想(FSAS48)を
+#       charts に足す(grp "sfc"。高層の図は grp "upper")。初期時刻は図ごと(高層の図とそろわなくてよい。AI の解説を待つ判定は高層の図だけで)
+#   (2) 答え合わせの資料: FBJP(国内悪天予想図)と全国航空気象解説報(国内空域 qyya82・福岡FIR qyya83)を nwp_img/ref_<id>.png に(KV には置かない)。
+#       スケジュール実行は先に図だけで解析し、そのあとこれと照らし合わせて ai.json の check に書く
+#   (3) 図や資料が変わったかは、前の nwp-img の charts.json(--prev)と比べる
 # 環境変数: CF_API_TOKEN・CF_ACCOUNT_ID・CF_KV_WX_ID(himawari と同じ)、ANTHROPIC_API_KEY(任意)・ANTHROPIC_MODEL(任意、既定 claude-sonnet-5-5)
 #   試験用: NWP_BASE(図の置き場所の代わり)、ANTHROPIC_BASE、--dry-run フォルダ
 import argparse, base64, datetime as dt, email.utils, io, json, os, subprocess, sys, tempfile, time
@@ -27,6 +33,13 @@ import requests
 BASE = os.environ.get("NWP_BASE", "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/").rstrip("/") + "/"
 UA = {"User-Agent": "approach-planner-wx/1.0 (personal, non-commercial)"}
 LATEST = "nwp:latest"
+WM_BASE = os.environ.get("WM_BASE", "https://www.jma.go.jp/bosai/weather_map/data/").rstrip("/") + "/"
+AIR_BASE = os.environ.get("AIRINFO_BASE", "https://www.data.jma.go.jp/airinfo/data/pict/").rstrip("/") + "/"
+# 地上天気図(list.json の near_monochrome の now・ft24・ft48)
+SFC = [("spas", "now", "SPAS 地上 実況(日本周辺)", 0), ("fsas24", "ft24", "FSAS24 地上 24時間予想", 24), ("fsas48", "ft48", "FSAS48 地上 48時間予想", 48)]
+# 答え合わせの資料(気象庁の予報官が作った物)
+REFS = [("fbjp", "fbjp/fbjp.png", "FBJP 国内悪天予想図"), ("cmnt_air", "ajpn_cmnt/qyya82.png", "全国航空気象解説報(国内空域)"),
+        ("cmnt_fir", "ajpn_cmnt/qyya83.png", "全国航空気象解説報(福岡FIR)")]
 DPI = 130   # PDF(約 845×726pt)→ 約 1525×1310px。文字が読めて、1 枚 数百 KB
 # (id, ファイルの名前, 表題, 予想の時間(解析は 0。FXJP854 は 12〜48 の 4 枚))
 CHARTS = [
@@ -97,6 +110,60 @@ def base_of(t, run):
     if b > t: b -= dt.timedelta(days=1)
     return b
 
+def gray4(im):
+    """グレーの画像 → 16 段階の灰色の PNG(4 ビット)"""
+    q = im.point(lambda v: round(v / 255 * 15) * 17).quantize(colors=16, method=2)
+    bio = io.BytesIO(); q.save(bio, "PNG", optimize=True, bits=4)
+    return bio.getvalue()
+
+def sfc_charts(have):
+    """地上天気図の最新(実況・24h・48h)。[(chart, png か None)]。png が None = 前のまま"""
+    import re
+    from PIL import Image
+    try:
+        r = requests.get(WM_BASE + "list.json", headers=UA, timeout=30); r.raise_for_status(); L = r.json().get("near_monochrome") or {}
+    except Exception as e: log(f"地上天気図の一覧: {e}"); return [(have[c[0]], None) for c in SFC if c[0] in have]
+    out = []
+    for cid, key, title, fh in SFC:
+        names = [n for n in (L.get(key) or []) if re.match(r"^\d{14}_0_Z__C_010000_\d{14}_MET_CHT_JCI(spas|fsas24|fsas48)_[A-Za-z0-9_]+\.png$", n)]
+        if not names:
+            if cid in have: out.append((have[cid], None))
+            continue
+        name = max(names, key=lambda n: (n.split("_")[6], n[:14]))   # 初期(解析)時刻が新しい物。同じなら後に出た物
+        if cid in have and have[cid].get("lm") == name: out.append((have[cid], None)); continue
+        png = None
+        for d in ("png/", ""):
+            try:
+                g = requests.get(WM_BASE + d + name, headers=UA, timeout=60)
+                if g.ok: png = g.content; break
+            except requests.RequestException as e: log(f"{cid}: {e}")
+        if not png:
+            log(f"{cid}: 取れませんでした {name}")
+            if cid in have: out.append((have[cid], None))
+            continue
+        im = Image.open(io.BytesIO(png)).convert("L"); b = gray4(im)
+        base = dt.datetime.strptime(name.split("_")[6], "%Y%m%d%H%M%S")
+        f = lambda x: x.strftime("%d日%H") + "Z"
+        valid = f"{f(base)} 実況" if fh == 0 else f"{f(base + dt.timedelta(hours=fh))} 予想(初期 {f(base)})"
+        c = {"id": cid, "grp": "sfc", "title": title, "lm": name, "base": base.strftime("%Y-%m-%dT%H:%MZ"), "valid": valid, "w": im.width, "h": im.height, "bytes": len(b)}
+        log(f"{cid}: {name} → {im.width}×{im.height} {len(b)/1e3:.0f}KB({valid})")
+        out.append((c, b))
+    return out
+
+def get_refs():
+    """答え合わせの資料。[(ref, png)](取れなかった物は入れない)"""
+    out = []
+    for rid, path, title in REFS:
+        try:
+            r = requests.get(AIR_BASE + path, headers=UA, timeout=60); r.raise_for_status()
+            if not r.content.startswith(b"\x89PNG"): raise ValueError("PNG ではありません")
+        except Exception as e: log(f"{rid}: 取れませんでした {e}"); continue
+        lm = r.headers.get("Last-Modified") or ""
+        t = email.utils.parsedate_to_datetime(lm).astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ") if lm else ""
+        out.append(({"id": rid, "title": title, "lm": lm, "at": t, "file": f"ref_{rid}.png", "src": AIR_BASE + path, "bytes": len(r.content)}, r.content))
+        log(f"{rid}: {lm} {len(r.content)/1e3:.0f}KB")
+    return out
+
 def render(pdf_bytes):
     """PDF → グレーの PNG(pdftoppm)。(png, 幅, 高さ)"""
     with tempfile.TemporaryDirectory() as tmp:
@@ -105,9 +172,7 @@ def render(pdf_bytes):
         from PIL import Image
         im = Image.open(os.path.join(tmp, "o.png")).convert("L")
     # 16 段階の灰色(4 ビットの PNG)にして小さく(pdftoppm のままの半分くらい。線と字はそのまま読める)
-    q = im.point(lambda v: round(v / 255 * 15) * 17).quantize(colors=16, method=2)
-    bio = io.BytesIO(); q.save(bio, "PNG", optimize=True, bits=4)
-    return bio.getvalue(), im.width, im.height
+    return gray4(im), im.width, im.height
 
 def valid_text(base, fh):
     f = lambda x: x.strftime("%d日%H") + "Z"
@@ -160,6 +225,10 @@ def ai_from_file(base):
     if not isinstance(a.get("charts"), dict) or not a.get("summary"): log(f"{AI_FILE} の形が違います"); return None
     out = {"base": base, "model": str(a.get("model") or "Claude(定時の解析)"), "at": str(a.get("at") or ""), "summary": str(a["summary"]),
            "charts": {k: str(v) for k, v in a["charts"].items()}}
+    # v201 答え合わせ(FBJP・全国航空気象解説報との照合)と、解析に使った図の版(図ごとの lm。Map が印と図を結び付ける)
+    if a.get("check"): out["check"] = str(a["check"])
+    if isinstance(a.get("lm"), dict): out["lm"] = {str(k): str(v) for k, v in a["lm"].items()}
+    if isinstance(a.get("refs"), list): out["refs"] = [str(x)[:80] for x in a["refs"][:6]]
     # v196 図に塗る印(解説の ①② と同じ番号)。形を確かめて、おかしい物は捨てる
     KINDS = {"front", "jet", "cat", "trough", "cold", "warm", "moist", "icing", "cb", "low", "high", "other"}
     def num(v): return float(v) if isinstance(v, (int, float)) and abs(v) < 1e5 else None
@@ -185,12 +254,14 @@ def ai_from_file(base):
     if marks: out["marks"] = marks
     return out
 
-def write_img_dir(d, charts, parts):
-    """スケジュール実行が読む用に、図(PNG)と一覧(charts.json)をフォルダに"""
+def write_img_dir(d, charts, parts, refs=()):
+    """スケジュール実行が読む用に、図(PNG)・答え合わせの資料(ref_<id>.png)と一覧(charts.json)をフォルダに"""
     os.makedirs(d, exist_ok=True)
     for c in charts: open(os.path.join(d, c["id"] + ".png"), "wb").write(parts[c["id"]])
-    json.dump({"charts": charts, "made": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ")}, open(os.path.join(d, "charts.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-    log(f"{d}/ に図 {len(charts)} 枚と charts.json を出しました")
+    for r, b in refs: open(os.path.join(d, r["file"]), "wb").write(b)
+    json.dump({"charts": charts, "refs": [r for r, _ in refs], "made": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ")},
+              open(os.path.join(d, "charts.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    log(f"{d}/ に図 {len(charts)} 枚・資料 {len(refs)} 枚と charts.json を出しました")
 
 def main():
     ap = argparse.ArgumentParser()
@@ -198,11 +269,16 @@ def main():
     ap.add_argument("--img-always", action="store_true", help="新しい図が無くても --img-dir に出す(ブランチ nwp-img がまだ無いとき)")
     ap.add_argument("--dry-run", default="", help="KV に書かず、このフォルダに出す(試験用)")
     ap.add_argument("--force-ai", action="store_true", help="同じ回でも AI の解説を作り直す")
+    ap.add_argument("--prev", default="", help="前の nwp-img の charts.json(図・資料が変わったかを比べる)")
     a = ap.parse_args()
     kv = KV(a.dry_run or None)
     old = kv.get(LATEST); head, parts = unpack(old) if old else ({}, {})
     have = {c["id"]: c for c in head.get("charts", []) if c["id"] in parts}
     charts, changed = [], False
+    # v201 地上天気図(先に並べる)
+    for c, b in sfc_charts(have):
+        charts.append(c)
+        if b is not None: parts[c["id"]] = b; changed = True
     for cid, name, title, fh in CHARTS:
         f = lm_of(name)
         if not f:
@@ -219,25 +295,32 @@ def main():
             continue
         base = base_of(t, run)
         parts[cid] = png; changed = True
-        charts.append({"id": cid, "title": title, "lm": lm, "base": base.strftime("%Y-%m-%dT%H:%MZ"), "valid": valid_text(base, fh), "w": w, "h": h, "bytes": len(png)})
+        charts.append({"id": cid, "grp": "upper", "title": title, "lm": lm, "base": base.strftime("%Y-%m-%dT%H:%MZ"), "valid": valid_text(base, fh), "w": w, "h": h, "bytes": len(png)})
         log(f"{cid}: {lm} → {w}×{h} {len(png)/1e3:.0f}KB({charts[-1]['valid']})")
     for k in list(parts):
         if not any(c["id"] == k for c in charts): parts.pop(k)
-    if a.img_dir and charts and (changed or a.img_always): write_img_dir(a.img_dir, charts, parts)
-    # AI の解説: 全部の図の初期時刻が同じとき。(1) スケジュール実行が書いた nwp_ai/ai.json(その回の物で、まだ取り込んでいなければ)(2) 無ければ Claude API(キーがあれば・回ごとに 1 回)
+    # v201 答え合わせの資料。図か資料が前の nwp-img と違えば、フォルダに出し直す
+    if a.img_dir and charts:
+        refs = get_refs()
+        try: prev = json.load(open(a.prev, encoding="utf-8")) if a.prev and os.path.exists(a.prev) else None
+        except Exception: prev = None
+        key = lambda L: sorted((x.get("id"), x.get("lm")) for x in (L or []))
+        moved = prev is None or key(prev.get("charts")) != key(charts) or key(prev.get("refs")) != key([r for r, _ in refs])
+        if changed or a.img_always or moved: write_img_dir(a.img_dir, charts, parts, refs)
+    # AI の解説: 高層の図(grp upper)の初期時刻が全部同じとき。(1) スケジュール実行が書いた nwp_ai/ai.json(その回の物で、まだ取り込んでいなければ)(2) 無ければ Claude API(キーがあれば・回ごとに 1 回)
     ai = head.get("ai")
-    bases = {c["base"] for c in charts}
+    bases = {c["base"] for c in charts if c.get("grp", "upper") == "upper"}   # v201 地上天気図は別の時刻でよい
     fa = ai_from_file(next(iter(bases))) if charts and len(bases) == 1 else None
-    if fa and (not ai or ai.get("base") != fa["base"] or ai.get("at") != fa["at"] or ai.get("summary") != fa["summary"]):
+    if fa and (not ai or any(ai.get(k) != fa.get(k) for k in ("base", "at", "summary", "check", "lm"))):
         ai = fa; changed = True; log(f"解説を取り込みました({AI_FILE}、{fa['base']}、{fa['model']})")
     elif fa: pass
     elif charts and len(bases) == 1 and os.environ.get("ANTHROPIC_API_KEY") and (a.force_ai or not ai or ai.get("base") != next(iter(bases))):
-        try: x = ai_explain([(c["id"], c["title"], parts[c["id"]]) for c in charts])
+        try: x = ai_explain([(c["id"], c["title"], parts[c["id"]]) for c in charts if c.get("grp", "upper") == "upper"])
         except Exception as e: log(f"AI の解説: {e}"); x = None
         if x: ai = {**x, "base": next(iter(bases)), "at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ")}; changed = True
     elif len(bases) > 1: log("図の初期時刻がそろっていないので、AI の解説は待ちます: " + ", ".join(sorted(bases)))
     if not changed: log("新しい図はありません。何もしません"); return
-    head = {"charts": charts, "ai": ai, "src": BASE, "attribution": "気象庁 数値予報天気図"}
+    head = {"charts": charts, "ai": ai, "src": BASE, "attribution": "気象庁 数値予報天気図・地上天気図"}
     blob = pack(head, {c["id"]: parts[c["id"]] for c in charts})
     kv.put(LATEST, blob)
     log(f"KV {LATEST} に書きました({len(blob)/1e6:.2f}MB、{len(charts)} 図" + (f"、AI の解説 {ai['base']}" if ai else "") + ")")
