@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+# v194 気象庁の数値予報天気図(PDF)を画像(PNG)にして Cloudflare の KV に置く(公開リポジトリの GitHub Actions)。
+#   ユーザー「ここらへんの図は重ねなくていいかも!個別にみたい!それぞれ、解析のポイントをポップアップで見れると助かる」
+#   「(ポイントは決まったガイド)に加えて(その回の図の解説)も claude api 使ってできたりする!?」
+#
+# 図: https://www.jma.go.jp/bosai/numericmap/data/nwpmap/<名前>_00.pdf・_12.pdf(00UTC・12UTC の回。同じ名前で上書きされる)
+#   AUPQ35(300・500hPa 解析)・AUPQ78(700・850hPa 解析)・AUPA20(圏界面・200hPa ジェット)・AUPA25(250hPa)・AUPN30(300hPa 北半球)
+#   FUPA252・FUPA302・FUPA502(250・300・500hPa 24 時間予想)・FXJP854(850hPa 相当温位・風 12〜48 時間予想)
+#   _00 と _12 のうち更新(Last-Modified)が新しい方を使う。回(初期時刻)は Last-Modified の前の 00/12UTC
+#
+# 出力(KV): nwp:latest = [見出しの長さ 4 バイト(ビッグエンディアン)][見出し JSON][PNG を並べたもの]
+#   見出し = { charts:[{ id, title, lm(気象庁の Last-Modified), base(初期時刻 ISO), valid(説明), w, h, bytes }], parts:{ id:[位置, 長さ] },
+#             ai:{ base, model, at, summary, charts:{ id:解説 } }(ANTHROPIC_API_KEY があるときだけ)、src, attribution }
+#   1 回の実行で書くのは多くて 1 回(どれかの図が新しくなったときだけ)。KV の無料枠(書き込み 1 日 1,000 回)をほとんど使わない
+#   AI の解説は、全部の図の初期時刻がそろったときに、その回について 1 回だけ作る(同じ回で作り直さない = API の料金を抑える)
+#
+# v195 ユーザー「claude に絶対の信頼を置いてる」「チャットに自動で送って解析してもらうとか」→ Claude のスケジュール実行(定時のタスク)が解説を書く:
+#   (1) このスクリプトが図を nwp_img/(<id>.png と charts.json)にも出し、Actions がブランチ nwp-img に置く(最新 1 回分だけ。履歴は増やさない)
+#   (2) Claude のスケジュール実行が 1 日 2 回 nwp-img の図を読み、main の nwp_ai/ai.json に解説を書く(高層天気図ごとの解析 + 全体の総括)
+#   (3) 次の実行でこのスクリプトが nwp_ai/ai.json を読み、図と同じ回の解説なら KV の見出しの ai に入れる
+#   ANTHROPIC_API_KEY があるときの Claude API の道も残す(ai.json が無い・古いときだけ使う)
+# 環境変数: CF_API_TOKEN・CF_ACCOUNT_ID・CF_KV_WX_ID(himawari と同じ)、ANTHROPIC_API_KEY(任意)・ANTHROPIC_MODEL(任意、既定 claude-sonnet-5-5)
+#   試験用: NWP_BASE(図の置き場所の代わり)、ANTHROPIC_BASE、--dry-run フォルダ
+import argparse, base64, datetime as dt, email.utils, io, json, os, subprocess, sys, tempfile, time
+import requests
+
+BASE = os.environ.get("NWP_BASE", "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/").rstrip("/") + "/"
+UA = {"User-Agent": "approach-planner-wx/1.0 (personal, non-commercial)"}
+LATEST = "nwp:latest"
+DPI = 130   # PDF(約 845×726pt)→ 約 1525×1310px。文字が読めて、1 枚 数百 KB
+# (id, ファイルの名前, 表題, 予想の時間(解析は 0。FXJP854 は 12〜48 の 4 枚))
+CHARTS = [
+    ("aupq35", "aupq35", "AUPQ35 300・500hPa 解析", 0),
+    ("aupq78", "aupq78", "AUPQ78 700・850hPa 解析", 0),
+    ("aupa20", "aupa20", "AUPA20 圏界面・200hPa ジェット 解析", 0),
+    ("aupa25", "aupa25", "AUPA25 250hPa 解析", 0),
+    ("aupn30", "aupn30", "AUPN30 300hPa 解析(北半球)", 0),
+    ("fupa252", "fupa252", "FUPA252 250hPa 24時間予想", 24),
+    ("fupa302", "fupa302", "FUPA302 300hPa 24時間予想", 24),
+    ("fupa502", "fupa502", "FUPA502 500hPa 24時間予想", 24),
+    ("fxjp854", "fxjp854", "FXJP854 850hPa 相当温位・風 12〜48時間予想", -1),
+]
+
+def log(*a): print(time.strftime("%H:%M:%S"), *a, flush=True)
+
+class KV:
+    """Cloudflare の KV(WX)。--dry-run ならフォルダに書く"""
+    def __init__(self, dry=None):
+        self.dry = dry
+        if dry: os.makedirs(dry, exist_ok=True); return
+        acc, ns, tok = os.environ.get("CF_ACCOUNT_ID"), os.environ.get("CF_KV_WX_ID"), os.environ.get("CF_API_TOKEN")
+        if not (acc and ns and tok): raise SystemExit("CF_ACCOUNT_ID / CF_KV_WX_ID / CF_API_TOKEN が未設定です(GitHub の Secrets に登録)")
+        base = os.environ.get("CF_API_BASE", "https://api.cloudflare.com/client/v4").rstrip("/")
+        self.url = f"{base}/accounts/{acc}/storage/kv/namespaces/{ns}/values/"
+        self.h = {**UA, "Authorization": "Bearer " + tok}
+    def _f(self, key): return os.path.join(self.dry, key.replace("/", "__"))
+    def get(self, key):
+        if self.dry: return open(self._f(key), "rb").read() if os.path.exists(self._f(key)) else None
+        r = requests.get(self.url + requests.utils.quote(key, safe=""), headers=self.h, timeout=60)
+        if r.status_code == 404: return None
+        r.raise_for_status(); return r.content
+    def put(self, key, data):
+        if self.dry: open(self._f(key), "wb").write(data); return
+        for attempt in range(4):
+            r = requests.put(self.url + requests.utils.quote(key, safe=""), headers={**self.h, "Content-Type": "application/octet-stream"}, data=data, timeout=300)
+            if r.ok: return
+            if attempt == 3: raise RuntimeError(f"KV に書けません({key}): HTTP {r.status_code} {r.text[:300]}")
+            time.sleep(3 + attempt * 5)
+
+def pack(head, parts):
+    offs, body = {}, bytearray()
+    for n, b in parts.items(): offs[n] = [len(body), len(b)]; body += b
+    hj = json.dumps(dict(head, parts=offs), ensure_ascii=False).encode("utf-8")
+    return len(hj).to_bytes(4, "big") + hj + bytes(body)
+
+def unpack(blob):
+    n = int.from_bytes(blob[:4], "big"); head = json.loads(blob[4:4 + n].decode("utf-8")); body = blob[4 + n:]
+    parts = {k: body[o:o + l] for k, (o, l) in head.pop("parts", {}).items()}
+    return head, parts
+
+def lm_of(name):
+    """_00・_12 の Last-Modified を調べて新しい方 (url, lm 文字列, datetime, 回 "00"/"12")。無ければ None"""
+    best = None
+    for run in ("00", "12"):
+        url = f"{BASE}{name}_{run}.pdf"
+        try: r = requests.head(url, headers=UA, timeout=30, allow_redirects=True)
+        except requests.RequestException as e: log(f"  {name}_{run}: {e}"); continue
+        lm = r.headers.get("Last-Modified")
+        if not r.ok or not lm: log(f"  {name}_{run}: HTTP {r.status_code}"); continue
+        t = email.utils.parsedate_to_datetime(lm).astimezone(dt.timezone.utc).replace(tzinfo=None)
+        if not best or t > best[2]: best = (url, lm, t, run)
+    return best
+
+def base_of(t, run):
+    """更新時刻 t と回("00"/"12")→ 初期時刻(t より前の、その時の 00 か 12UTC)"""
+    b = t.replace(hour=int(run), minute=0, second=0, microsecond=0)
+    if b > t: b -= dt.timedelta(days=1)
+    return b
+
+def render(pdf_bytes):
+    """PDF → グレーの PNG(pdftoppm)。(png, 幅, 高さ)"""
+    with tempfile.TemporaryDirectory() as tmp:
+        p = os.path.join(tmp, "a.pdf"); open(p, "wb").write(pdf_bytes)
+        subprocess.run(["pdftoppm", "-r", str(DPI), "-gray", "-png", "-singlefile", p, os.path.join(tmp, "o")], check=True)
+        from PIL import Image
+        im = Image.open(os.path.join(tmp, "o.png")).convert("L")
+    # 16 段階の灰色(4 ビットの PNG)にして小さく(pdftoppm のままの半分くらい。線と字はそのまま読める)
+    q = im.point(lambda v: round(v / 255 * 15) * 17).quantize(colors=16, method=2)
+    bio = io.BytesIO(); q.save(bio, "PNG", optimize=True, bits=4)
+    return bio.getvalue(), im.width, im.height
+
+def valid_text(base, fh):
+    f = lambda x: x.strftime("%d日%H") + "Z"
+    if fh == 0: return f"{f(base)} 解析"
+    if fh < 0: return f"初期 {f(base)}(+12〜+48h: {f(base + dt.timedelta(hours=12))}〜{f(base + dt.timedelta(hours=48))})"
+    return f"{f(base + dt.timedelta(hours=fh))} 予想(初期 {f(base)})"
+
+# ---- AI の解説(Claude API)----
+AI_SYSTEM = """あなたは日本の国内線を飛ぶ旅客機の運航乗務員(ボーイング 787 の機長)のための航空気象の解析担当です。
+渡す気象庁の数値予報天気図(高層の解析図・予想図、850hPa 相当温位)を読み、運航(巡航・上昇降下・出発到着)に役立つ要点を日本語で簡潔にまとめてください。
+- 図から読み取れることだけを書き、読み取れないことは書かない。推測は「〜の可能性」と書く。
+- 見るべき点: ジェット気流の位置・強さ(kt)・高度、等風速線の混み(CAT)、気圧の谷・寒冷渦・寒気(500hPa の気温)、圏界面の高さの変化、下層の湿り(湿数)と着氷の高さ、850hPa の相当温位の集中帯(前線)・暖湿気の流入、24 時間後の変化。
+- 日本付近(特に本州・九州・北海道・沖縄の航空路)に関係することを優先する。
+- 高度は FL で(850hPa≈FL050、700≈FL100、500≈FL180、300≈FL300、250≈FL340、200≈FL390)。
+出力は次の JSON だけ(前後に何も付けない): {"summary": "全体の要点(3〜5 行、・で始まる箇条書き)", "charts": {"<図の id>": "その図の要点(2〜4 行、・で始まる箇条書き)", ...}}"""
+
+def ai_explain(items):
+    """items = [(id, title, png)]。{summary, charts} か None"""
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key: log("ANTHROPIC_API_KEY が無いので AI の解説は作りません"); return None
+    model = os.environ.get("ANTHROPIC_MODEL") or "claude-sonnet-5-5"   # Variables が空でも既定
+    from PIL import Image
+    content = []
+    for cid, title, png in items:
+        im = Image.open(io.BytesIO(png)).convert("L"); s = 1568 / max(im.size)
+        if s < 1: im = im.resize((round(im.width * s), round(im.height * s)), Image.LANCZOS)
+        bio = io.BytesIO(); im.save(bio, "PNG", optimize=True)
+        content.append({"type": "text", "text": f"図の id: {cid}({title})"})
+        content.append({"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": base64.b64encode(bio.getvalue()).decode()}})
+    content.append({"type": "text", "text": "上の図を読んで、指定の JSON で答えてください。charts のキーは図の id: " + ", ".join(i[0] for i in items)})
+    url = os.environ.get("ANTHROPIC_BASE", "https://api.anthropic.com").rstrip("/") + "/v1/messages"
+    r = requests.post(url, headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                      json={"model": model, "max_tokens": 4000, "system": AI_SYSTEM, "messages": [{"role": "user", "content": content}]}, timeout=300)
+    if not r.ok: log(f"AI の解説: HTTP {r.status_code} {r.text[:300]}"); return None
+    j = r.json(); txt = "".join(c.get("text", "") for c in j.get("content", []) if c.get("type") == "text").strip()
+    if txt.startswith("```"): txt = txt.strip("`").split("\n", 1)[1] if "\n" in txt else txt
+    try:
+        a = json.loads(txt[txt.find("{"): txt.rfind("}") + 1])
+    except Exception as e: log(f"AI の解説を読めません: {e} {txt[:300]}"); return None
+    u = j.get("usage", {}); log(f"AI の解説 できました({model}、入力 {u.get('input_tokens')}・出力 {u.get('output_tokens')} トークン)")
+    return {"model": model, "summary": str(a.get("summary", "")), "charts": {k: str(v) for k, v in (a.get("charts") or {}).items()}}
+
+AI_FILE = "nwp_ai/ai.json"
+def ai_from_file(base):
+    """スケジュール実行が書いた解説(その回の物だけ)。無ければ None"""
+    if not os.path.exists(AI_FILE): return None
+    try: a = json.load(open(AI_FILE, encoding="utf-8"))
+    except Exception as e: log(f"{AI_FILE} を読めません: {e}"); return None
+    if a.get("base") != base: log(f"{AI_FILE} は別の回({a.get('base')})の解説です"); return None
+    if not isinstance(a.get("charts"), dict) or not a.get("summary"): log(f"{AI_FILE} の形が違います"); return None
+    return {"base": base, "model": str(a.get("model") or "Claude(定時の解析)"), "at": str(a.get("at") or ""), "summary": str(a["summary"]),
+            "charts": {k: str(v) for k, v in a["charts"].items()}}
+
+def write_img_dir(d, charts, parts):
+    """スケジュール実行が読む用に、図(PNG)と一覧(charts.json)をフォルダに"""
+    os.makedirs(d, exist_ok=True)
+    for c in charts: open(os.path.join(d, c["id"] + ".png"), "wb").write(parts[c["id"]])
+    json.dump({"charts": charts, "made": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ")}, open(os.path.join(d, "charts.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    log(f"{d}/ に図 {len(charts)} 枚と charts.json を出しました")
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--img-dir", default="", help="図をこのフォルダにも出す(スケジュール実行が読む用。新しい図があったときだけ)")
+    ap.add_argument("--img-always", action="store_true", help="新しい図が無くても --img-dir に出す(ブランチ nwp-img がまだ無いとき)")
+    ap.add_argument("--dry-run", default="", help="KV に書かず、このフォルダに出す(試験用)")
+    ap.add_argument("--force-ai", action="store_true", help="同じ回でも AI の解説を作り直す")
+    a = ap.parse_args()
+    kv = KV(a.dry_run or None)
+    old = kv.get(LATEST); head, parts = unpack(old) if old else ({}, {})
+    have = {c["id"]: c for c in head.get("charts", []) if c["id"] in parts}
+    charts, changed = [], False
+    for cid, name, title, fh in CHARTS:
+        f = lm_of(name)
+        if not f:
+            if cid in have: charts.append(have[cid])
+            continue
+        url, lm, t, run = f
+        if cid in have and have[cid].get("lm") == lm: charts.append(have[cid]); continue
+        try:
+            r = requests.get(url, headers=UA, timeout=120); r.raise_for_status()
+            png, w, h = render(r.content)
+        except Exception as e:
+            log(f"{cid}: 取れませんでした {e}")
+            if cid in have: charts.append(have[cid])
+            continue
+        base = base_of(t, run)
+        parts[cid] = png; changed = True
+        charts.append({"id": cid, "title": title, "lm": lm, "base": base.strftime("%Y-%m-%dT%H:%MZ"), "valid": valid_text(base, fh), "w": w, "h": h, "bytes": len(png)})
+        log(f"{cid}: {lm} → {w}×{h} {len(png)/1e3:.0f}KB({charts[-1]['valid']})")
+    for k in list(parts):
+        if not any(c["id"] == k for c in charts): parts.pop(k)
+    if a.img_dir and charts and (changed or a.img_always): write_img_dir(a.img_dir, charts, parts)
+    # AI の解説: 全部の図の初期時刻が同じとき。(1) スケジュール実行が書いた nwp_ai/ai.json(その回の物で、まだ取り込んでいなければ)(2) 無ければ Claude API(キーがあれば・回ごとに 1 回)
+    ai = head.get("ai")
+    bases = {c["base"] for c in charts}
+    fa = ai_from_file(next(iter(bases))) if charts and len(bases) == 1 else None
+    if fa and (not ai or ai.get("base") != fa["base"] or ai.get("at") != fa["at"] or ai.get("summary") != fa["summary"]):
+        ai = fa; changed = True; log(f"解説を取り込みました({AI_FILE}、{fa['base']}、{fa['model']})")
+    elif fa: pass
+    elif charts and len(bases) == 1 and os.environ.get("ANTHROPIC_API_KEY") and (a.force_ai or not ai or ai.get("base") != next(iter(bases))):
+        try: x = ai_explain([(c["id"], c["title"], parts[c["id"]]) for c in charts])
+        except Exception as e: log(f"AI の解説: {e}"); x = None
+        if x: ai = {**x, "base": next(iter(bases)), "at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ")}; changed = True
+    elif len(bases) > 1: log("図の初期時刻がそろっていないので、AI の解説は待ちます: " + ", ".join(sorted(bases)))
+    if not changed: log("新しい図はありません。何もしません"); return
+    head = {"charts": charts, "ai": ai, "src": BASE, "attribution": "気象庁 数値予報天気図"}
+    blob = pack(head, {c["id"]: parts[c["id"]] for c in charts})
+    kv.put(LATEST, blob)
+    log(f"KV {LATEST} に書きました({len(blob)/1e6:.2f}MB、{len(charts)} 図" + (f"、AI の解説 {ai['base']}" if ai else "") + ")")
+
+if __name__ == "__main__":
+    main()
