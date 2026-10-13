@@ -158,8 +158,32 @@ def ai_from_file(base):
     except Exception as e: log(f"{AI_FILE} を読めません: {e}"); return None
     if a.get("base") != base: log(f"{AI_FILE} は別の回({a.get('base')})の解説です"); return None
     if not isinstance(a.get("charts"), dict) or not a.get("summary"): log(f"{AI_FILE} の形が違います"); return None
-    return {"base": base, "model": str(a.get("model") or "Claude(定時の解析)"), "at": str(a.get("at") or ""), "summary": str(a["summary"]),
-            "charts": {k: str(v) for k, v in a["charts"].items()}}
+    out = {"base": base, "model": str(a.get("model") or "Claude(定時の解析)"), "at": str(a.get("at") or ""), "summary": str(a["summary"]),
+           "charts": {k: str(v) for k, v in a["charts"].items()}}
+    # v196 図に塗る印(解説の ①② と同じ番号)。形を確かめて、おかしい物は捨てる
+    KINDS = {"front", "jet", "cat", "trough", "cold", "warm", "moist", "icing", "cb", "low", "high", "other"}
+    def num(v): return float(v) if isinstance(v, (int, float)) and abs(v) < 1e5 else None
+    marks = {}
+    for cid, lst in (a.get("marks") or {}).items():
+        if cid not in out["charts"] or not isinstance(lst, list): continue
+        ok = []
+        for m in lst[:12]:
+            if not isinstance(m, dict): continue
+            sh, kind = m.get("shape"), m.get("kind") if m.get("kind") in KINDS else "other"
+            q = {"n": int(m["n"]) if isinstance(m.get("n"), int) else len(ok) + 1, "kind": kind, "label": str(m.get("label") or "")[:24], "shape": sh}
+            if sh == "ellipse":
+                v = [num(m.get(k)) for k in ("cx", "cy", "rx", "ry")]
+                if None in v: continue
+                q.update(cx=v[0], cy=v[1], rx=v[2], ry=v[3], rot=num(m.get("rot")) or 0)
+            elif sh in ("poly", "line"):
+                pts = [[num(p[0]), num(p[1])] for p in (m.get("pts") or []) if isinstance(p, list) and len(p) == 2]
+                if len(pts) < 2 or any(None in p for p in pts): continue
+                q["pts"] = pts[:60]
+            else: continue
+            ok.append(q)
+        if ok: marks[cid] = ok
+    if marks: out["marks"] = marks
+    return out
 
 def write_img_dir(d, charts, parts):
     """スケジュール実行が読む用に、図(PNG)と一覧(charts.json)をフォルダに"""
