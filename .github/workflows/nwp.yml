@@ -1,0 +1,55 @@
+name: JMA NWP charts
+
+# v194 気象庁の数値予報天気図(AUPQ35・AUPQ78・AUPA20・AUPA25・AUPN30・FUPA252・FUPA302・FUPA502・FXJP854)の PDF を画像にして Cloudflare の KV に置く(tools/nwp_build.py)。
+#  - 起動: Cloudflare の Worker の定期実行(worker/nwp.js の nwpCron、毎時 22 分)から。手で動かすときは Actions → JMA NWP charts → Run workflow。
+#  - 新しくなった図が無ければ KV に書かずにすぐ終わる。
+#  - AI の解説(任意): Secrets に ANTHROPIC_API_KEY があれば、全部の図の回がそろったとき、その回について 1 回だけ Claude API で作る(1 日 2 回ほど)。
+#    モデルは Variables の ANTHROPIC_MODEL で変えられる(既定 claude-sonnet-5-5)。
+#  - v195 AI の解説は Claude のスケジュール実行(1 日 2 回)が書く: ここで図をブランチ nwp-img に置き(最新 1 回分だけ、履歴なし)、
+#    スケジュール実行が main の nwp_ai/ai.json に書いた解説を、次の実行で KV に取り込む。ANTHROPIC_API_KEY は無くてよい
+# 必要な Secrets: CF_API_TOKEN・CF_ACCOUNT_ID・CF_KV_WX_ID(ひまわりと同じ)、ANTHROPIC_API_KEY(任意)
+on:
+  workflow_dispatch:
+    inputs:
+      force_ai:
+        description: "同じ回でも AI の解説を作り直す"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # v195 ブランチ nwp-img に図を置くため
+
+concurrency:
+  group: nwp
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
+          pip install --quiet requests pillow
+      - name: Build and upload
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_KV_WX_ID: ${{ secrets.CF_KV_WX_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+        run: |
+          EXTRA=""; git ls-remote --exit-code origin nwp-img >/dev/null 2>&1 || EXTRA="--img-always"   # ブランチがまだ無ければ今の図で作る
+          python3 -u tools/nwp_build.py --img-dir nwp_img $EXTRA ${{ github.event.inputs.force_ai == 'true' && '--force-ai' || '' }}
+      - name: Publish images for the scheduled Claude analysis
+        if: ${{ hashFiles('nwp_img/charts.json') != '' }}
+        run: |
+          cd nwp_img
+          git init -q && git checkout -q -b nwp-img && git add -A
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -qm "nwp images $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" nwp-img
