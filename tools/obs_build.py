@@ -129,10 +129,14 @@ def obs_sigmet():
         fir = str(s.get("firId") or s.get("icaoId") or "") + " " + str(s.get("firName") or "")
         if "RJJJ" not in fir and "FUKUOKA" not in fir.upper(): continue
         out.append({k: s.get(k) for k in ("firId", "seriesId", "hazard", "qualifier", "base", "top", "validTimeFrom", "validTimeTo", "dir", "spd", "chng", "coords", "rawSigmet") if k in s})
-    log(f"SIGMET(福岡 FIR): {len(out)} 件(全体 {len(j) if isinstance(j, list) else '?'} 件)"); return out
+    firs = sorted({str(s.get("firId") or s.get("icaoId")) for s in j if isinstance(s, dict)}) if isinstance(j, list) else []
+    log(f"SIGMET(福岡 FIR): {len(out)} 件(全体 {len(j) if isinstance(j, list) else '?'} 件、FIR {len(firs)}: {' '.join(firs)[:300]}"
+        + (f"、項目 {sorted(j[0].keys())}" if isinstance(j, list) and j and isinstance(j[0], dict) else "") + ")"); return out
 
 def obs_pirep():
     j = awc("pirep", format="json", bbox=f"{LAT0},{LON0},{LAT1},{LON1}", age=1)
+    if not j:   # bbox の書き方が違うかもしれないので、全体を取って絞る
+        j = awc("pirep", format="json", age=1); log(f"PIREP: bbox なしで {len(j) if isinstance(j, list) else '?'} 通" + (f"、項目 {sorted(j[0].keys())}" if isinstance(j, list) and j and isinstance(j[0], dict) else ""))
     out = []
     for p in j if isinstance(j, list) else []:
         if not isinstance(p, dict): continue
