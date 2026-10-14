@@ -299,6 +299,35 @@ def write_img_dir(d, charts, parts, refs=()):
               open(os.path.join(d, "charts.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     log(f"{d}/ に図 {len(charts)} 枚・資料 {len(refs)} 枚と charts.json を出しました")
 
+# v206 事後検証(ユーザー「1 いいね!」): 予想図(と解析図)の前の回を nwp_img/hist/<初期時刻>/<id>.png に 36 時間分残す。
+#   Claude の定時の解析が、前の回の予想図と今の解析図を比べられるように(例: 24 時間前の FUPA502 と今の AUPQ35 下段)
+HIST_H = 36
+def keep_hist(d, prev_dir, charts):
+    import shutil
+    if not prev_dir or not os.path.isdir(prev_dir): return
+    now = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None); hd = os.path.join(d, "hist"); n = 0
+    ok = lambda b: (now - dt.datetime.strptime(b, "%Y%m%dT%H%MZ")).total_seconds() <= HIST_H * 3600
+    ph = os.path.join(prev_dir, "hist")
+    if os.path.isdir(ph):   # 前の履歴(36 時間以内)
+        for b in os.listdir(ph):
+            try:
+                if not ok(b): continue
+            except ValueError: continue
+            for fn in os.listdir(os.path.join(ph, b)):
+                os.makedirs(os.path.join(hd, b), exist_ok=True); shutil.copyfile(os.path.join(ph, b, fn), os.path.join(hd, b, fn)); n += 1
+    try: pc = json.load(open(os.path.join(prev_dir, "charts.json"), encoding="utf-8")).get("charts", [])
+    except Exception: pc = []
+    now_lm = {c["id"]: c.get("lm") for c in charts}
+    for c in pc:   # 前の nwp-img の図のうち、今は新しくなった物
+        src = os.path.join(prev_dir, c["id"] + ".png")
+        if now_lm.get(c["id"]) == c.get("lm") or not os.path.exists(src): continue
+        b = c["base"].replace("-", "").replace(":", "")
+        try:
+            if not ok(b): continue
+        except ValueError: continue
+        os.makedirs(os.path.join(hd, b), exist_ok=True); shutil.copyfile(src, os.path.join(hd, b, c["id"] + ".png")); n += 1
+    if n: log(f"{hd}/ に前の回の図 {n} 枚")
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--img-dir", default="", help="図をこのフォルダにも出す(スケジュール実行が読む用。新しい図があったときだけ)")
@@ -306,6 +335,7 @@ def main():
     ap.add_argument("--dry-run", default="", help="KV に書かず、このフォルダに出す(試験用)")
     ap.add_argument("--force-ai", action="store_true", help="同じ回でも AI の解説を作り直す")
     ap.add_argument("--prev", default="", help="前の nwp-img の charts.json(図・資料が変わったかを比べる)")
+    ap.add_argument("--prev-dir", default="", help="前の nwp-img の中身(前の回の図を hist/ に残す)")
     a = ap.parse_args()
     kv = KV(a.dry_run or None)
     old = kv.get(LATEST); head, parts = unpack(old) if old else ({}, {})
@@ -362,7 +392,7 @@ def main():
         except Exception: prev = None
         key = lambda L: sorted((x.get("id"), x.get("lm")) for x in (L or []))
         moved = prev is None or key(prev.get("charts")) != key(charts) or key(prev.get("refs")) != key([r for r, _ in refs])
-        if changed or a.img_always or moved: write_img_dir(a.img_dir, charts, parts, refs)
+        if changed or a.img_always or moved: write_img_dir(a.img_dir, charts, parts, refs); keep_hist(a.img_dir, a.prev_dir, charts)
     # AI の解説: 高層の図(grp upper)の初期時刻が全部同じとき。(1) スケジュール実行が書いた nwp_ai/ai.json(その回の物で、まだ取り込んでいなければ)(2) 無ければ Claude API(キーがあれば・回ごとに 1 回)
     ai = head.get("ai")
     bases = {c["base"] for c in charts if c.get("grp", "upper") == "upper"}   # v201 地上天気図は別の時刻でよい

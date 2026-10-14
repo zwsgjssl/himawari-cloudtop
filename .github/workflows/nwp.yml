@@ -46,8 +46,13 @@ jobs:
         run: |
           EXTRA=""; git ls-remote --exit-code origin nwp-img >/dev/null 2>&1 || EXTRA="--img-always"   # ブランチがまだ無ければ今の図で作る
           # v201 前の nwp-img の charts.json(図・答え合わせの資料が変わったかを比べる)
-          if [ -z "$EXTRA" ] && git fetch -q --depth 1 origin +refs/heads/nwp-img:refs/remotes/origin/nwp-img 2>/dev/null; then git show origin/nwp-img:charts.json > /tmp/prev_charts.json 2>/dev/null || true; fi
-          python3 -u tools/nwp_build.py --img-dir nwp_img --prev /tmp/prev_charts.json $EXTRA ${{ github.event.inputs.force_ai == 'true' && '--force-ai' || '' }}
+          # v206 前の nwp-img の中身(前の回の図を hist/ に残す)
+          mkdir -p /tmp/prev_img
+          if [ -z "$EXTRA" ] && git fetch -q --depth 1 origin +refs/heads/nwp-img:refs/remotes/origin/nwp-img 2>/dev/null; then
+            git show origin/nwp-img:charts.json > /tmp/prev_charts.json 2>/dev/null || true
+            git archive origin/nwp-img | tar -x -C /tmp/prev_img || true
+          fi
+          python3 -u tools/nwp_build.py --img-dir nwp_img --prev /tmp/prev_charts.json --prev-dir /tmp/prev_img $EXTRA ${{ github.event.inputs.force_ai == 'true' && '--force-ai' || '' }}
       - name: Publish images for the scheduled Claude analysis
         if: ${{ hashFiles('nwp_img/charts.json') != '' }}
         run: |
@@ -55,3 +60,18 @@ jobs:
           git init -q && git checkout -q -b nwp-img && git add -A
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -qm "nwp images $(date -u +%Y-%m-%dT%H:%MZ)"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" nwp-img
+      # v206 事後検証用の観測の記録(雷・レーダー・赤外・雲頂・METAR・SIGMET・PIREP)を毎時ブランチ nwp-obs に(tools/obs_build.py。3 日分)
+      - name: Observations for verification
+        if: always()
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_KV_WX_ID: ${{ secrets.CF_KV_WX_ID }}
+        run: |
+          mkdir -p nwp_obs
+          if git fetch -q --depth 1 origin +refs/heads/nwp-obs:refs/remotes/origin/nwp-obs 2>/dev/null; then git archive origin/nwp-obs | tar -x -C nwp_obs; fi
+          python3 -u tools/obs_build.py --dir nwp_obs
+          cd nwp_obs
+          rm -rf .git && git init -q && git checkout -q -b nwp-obs && git add -A
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -qm "obs $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" nwp-obs

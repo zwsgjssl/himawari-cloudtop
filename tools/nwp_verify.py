@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+# v206 事後検証(ユーザー「(実際との答え合わせ)いいね!赤外やレーダーも既に取得済みのデータだから使えるね」)
+#   Claude の定時の解析が、前の回の予想(nwp_ai/history/<初期時刻>.json の claims)が当たったかを、実際の観測の記録(ブランチ nwp-obs の obs/*.json、tools/obs_build.py)で確かめる道具。
+#   結果は Markdown で標準出力に(Claude が読んで解析と lessons.md に生かす)。--json で同じ内容を JSON にも
+#   claims の形: [{"id":"c1","kind":"cb|cat|icing|front|low|wind|jet|other","text":"…","box":[南の緯度,北の緯度,西の経度,東の経度],"fl":[下,上](無ければ null),"from":"YYYY-MM-DDTHH:MMZ","to":"…"}]
+#   判定(目安。観測が無い所は「分からない」と書く):
+#     cb    … 当たり = その範囲・時間に 雷 1 回以上 / レーダー 20mm/h 以上 / 赤外 215K 以下 のどれか。どれも無ければ外れ
+#     cat   … 当たり = 福岡 FIR の SIGMET(TURB)か PIREP の MOD 以上の揺れ(範囲・時間・高さが重なる)。無ければ「報告なし」(当たり外れは決めない)
+#     icing … 同じく SIGMET(ICE)か PIREP の MOD 以上の着氷
+#     それ以外 … 範囲の空港の METAR の目立った物(雷・強風)を並べるだけ
+#   予想に無かった事: 前の回のどの claim にも入らない 雷の多い升(1 時間 10 回以上)・SIGMET・PIREP の MOD 以上
+import argparse, datetime as dt, glob, json, os, re
+
+def T(s): return dt.datetime.strptime(s.replace("-", "").replace(":", "")[:13], "%Y%m%dT%H%M")
+def ep(v):
+    """SIGMET の時刻(秒・ミリ秒・ISO 文字列)→ datetime"""
+    if v is None: return None
+    if isinstance(v, (int, float)): return dt.datetime.utcfromtimestamp(v / 1000 if v > 1e11 else v)
+    try: return dt.datetime.fromisoformat(str(v).replace("Z", "")).replace(tzinfo=None)
+    except ValueError: return None
+def fl(v):
+    if v in (None, ""): return None
+    try: v = float(v)
+    except (TypeError, ValueError): return None
+    return int(round(v / 100 if v > 1000 else v))
+def cells(b):
+    s, n, w, e = b; return [f"{i},{j}" for i in range(int(s // 1), int(-(-n // 1))) for j in range(int(w // 1), int(-(-e // 1)))]
+def inbox(b, lat, lon): return lat is not None and lon is not None and b[0] <= float(lat) <= b[1] and b[2] <= float(lon) <= b[3]
+def fl_ok(c, lo, hi, pad=20):
+    if not c.get("fl") or (lo is None and hi is None): return True
+    lo = lo if lo is not None else 0; hi = hi if hi is not None else 600
+    return lo <= c["fl"][1] + pad and hi >= c["fl"][0] - pad
+SEV = re.compile(r"MOD|SEV|EXTRM", re.I)
+
+def load_obs(d):
+    out = []
+    for f in sorted(glob.glob(os.path.join(d, "obs", "*.json"))):
+        day = os.path.basename(f)[:8]
+        for hh, r in json.load(open(f, encoding="utf-8")).get("hours", {}).items():
+            out.append((dt.datetime.strptime(day + hh[:2], "%Y%m%d%H"), r))
+    return sorted(out, key=lambda x: x[0])
+
+def sig_box(s):
+    c = s.get("coords") or []
+    pts = [(p.get("lat"), p.get("lon")) for p in c if isinstance(p, dict)] if c and isinstance(c[0], dict) else [tuple(p[:2]) for p in c if isinstance(p, (list, tuple))]
+    pts = [(float(a), float(b)) for a, b in pts if a is not None and b is not None]
+    if not pts: return None
+    return [min(p[0] for p in pts), max(p[0] for p in pts), min(p[1] for p in pts), max(p[1] for p in pts)]
+def overlap(a, b): return a and b and a[0] <= b[1] and a[1] >= b[0] and a[2] <= b[3] and a[3] >= b[2]
+
+def sigmets(obs):
+    seen, out = set(), []
+    for _, r in obs:
+        for s in r.get("sigmet") or []:
+            k = (s.get("seriesId"), s.get("validTimeFrom"), s.get("hazard"))
+            if k in seen: continue
+            seen.add(k); out.append(s)
+    return out
+def pireps(obs):
+    seen, out = set(), []
+    for _, r in obs:
+        for p in r.get("pirep") or []:
+            k = p.get("rawOb") or json.dumps(p, sort_keys=True)
+            if k in seen: continue
+            seen.add(k); out.append(p)
+    return out
+
+def judge(c, obs, SG, PR):
+    f0, f1 = T(c["from"]), T(c["to"]); b = c["box"]; cs = set(cells(b))
+    hrs = [(h, r) for h, r in obs if f0 < h <= f1 + dt.timedelta(hours=1)]
+    if not hrs: return "観測の記録なし(分からない)", []
+    ltg = sum(v for h, r in hrs for k, v in ((r.get("ltg") or {}).get("box") or {}).items() if k in cs)
+    rmx = max([v for h, r in hrs for k, v in ((r.get("rad") or {}).get("max") or {}).items() if k in cs] or [0])
+    irm = min([v for h, r in hrs for k, v in ((r.get("irmin") or {}).get("box") or {}).items() if k in cs] or [999])
+    ctp = max([v for h, r in hrs for k, v in ((r.get("ctop") or {}).get("box") or {}).items() if k in cs] or [0])
+    info = [f"雷 {ltg} 回・レーダー最大 段階{rmx}" + (f"(20mm/h 以上)" if rmx >= 5 else "") + (f"・赤外最低 {irm}K" if irm < 999 else "") + (f"・雲頂最高 FL{ctp}" if ctp else "")]
+    sg = [s for s in SG if overlap(sig_box(s), b) and (ep(s.get("validTimeFrom")) or f0) <= f1 and (ep(s.get("validTimeTo")) or f1) >= f0 and fl_ok(c, fl(s.get("base")), fl(s.get("top")))]
+    pr = [p for p in PR if inbox(b, p.get("lat"), p.get("lon")) and (ep(p.get("obsTime")) or f0) >= f0 - dt.timedelta(hours=1) and (ep(p.get("obsTime")) or f1) <= f1 + dt.timedelta(hours=1)
+          and fl_ok(c, fl(p.get("fltLvl")), fl(p.get("fltLvl")))]
+    for s in sg: info.append(f"SIGMET {s.get('hazard')} {s.get('qualifier') or ''} FL{fl(s.get('base'))}〜{fl(s.get('top'))}: {str(s.get('rawSigmet') or '')[:120]}")
+    for p in pr:
+        if p.get("tbInt1") or p.get("icgInt1"): info.append(f"PIREP {p.get('obsTime')} FL{fl(p.get('fltLvl'))} {p.get('acType') or ''} 揺れ {p.get('tbInt1') or '-'} 着氷 {p.get('icgInt1') or '-'}")
+    k = c.get("kind")
+    if k == "cb":
+        v = "当たり" if (ltg >= 1 or rmx >= 5 or irm <= 215) else "外れ(雷・強い雨・冷たい雲頂なし)"
+    elif k == "cat":
+        hit = any("TURB" in str(s.get("hazard", "")).upper() for s in sg) or any(SEV.search(str(p.get("tbInt1") or "")) for p in pr)
+        v = "当たり(SIGMET・PIREP)" if hit else "報告なし(当たり外れは決めない)"
+    elif k == "icing":
+        hit = any("ICE" in str(s.get("hazard", "")).upper() for s in sg) or any(SEV.search(str(p.get("icgInt1") or "")) for p in pr)
+        v = "当たり(SIGMET・PIREP)" if hit else "報告なし(当たり外れは決めない)"
+    else:
+        v = "参考"
+        for h, r in hrs:
+            for m in r.get("metar") or []:
+                if inbox(b, m.get("lat"), m.get("lon")) and (re.search(r"TS|\+RA|SQ", str(m.get("wx") or "")) or (m.get("wgst") or 0) >= 25 or (m.get("wspd") or 0) >= 25):
+                    info.append(f"METAR {m.get('raw')}")
+    return v, list(dict.fromkeys(info))   # 同じ行は 1 つに
+
+def unforecast(claims, obs, SG, PR, t0, t1):
+    out = []
+    cb = [c for c in claims if c.get("kind") == "cb"]
+    for h, r in obs:
+        if not (t0 < h <= t1): continue
+        for k, v in ((r.get("ltg") or {}).get("box") or {}).items():
+            if v < 10: continue
+            la, lo = map(int, k.split(","))
+            if not any(inbox(c["box"], la + .5, lo + .5) and T(c["from"]) < h <= T(c["to"]) + dt.timedelta(hours=1) for c in cb):
+                out.append(f"{h:%d日%HZ} 雷 {v} 回(北緯{la}〜{la+1}・東経{lo}〜{lo+1})が CB の予想の外")
+    for s in SG:
+        hz = str(s.get("hazard", "")).upper(); kind = "cat" if "TURB" in hz else "icing" if "ICE" in hz else "cb" if "TS" in hz else None
+        a, b = ep(s.get("validTimeFrom")), ep(s.get("validTimeTo"))
+        if not kind or (a and a > t1) or (b and b < t0): continue
+        if not any(c.get("kind") == kind and overlap(sig_box(s), c["box"]) for c in claims):
+            out.append(f"SIGMET {hz} FL{fl(s.get('base'))}〜{fl(s.get('top'))} が予想の外: {str(s.get('rawSigmet') or '')[:120]}")
+    for p in PR:
+        t = ep(p.get("obsTime"))
+        if not t or not (t0 < t <= t1): continue
+        for kind, key in (("cat", "tbInt1"), ("icing", "icgInt1")):
+            if SEV.search(str(p.get(key) or "")) and not any(c.get("kind") == kind and inbox(c["box"], p.get("lat"), p.get("lon")) for c in claims):
+                out.append(f"PIREP {t:%d日%H%MZ} FL{fl(p.get('fltLvl'))} {'揺れ' if kind == 'cat' else '着氷'} {p.get(key)}(北緯{p.get('lat')}・東経{p.get('lon')})が予想の外")
+    return out
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--obs", required=True, help="ブランチ nwp-obs の中身のフォルダ")
+    ap.add_argument("--hist", required=True, help="nwp_ai/history(前の回の ai.json)")
+    ap.add_argument("--base", default="", help="今の回(これより前の回を確かめる)")
+    ap.add_argument("--hours", type=int, default=48, help="何時間前の回まで")
+    ap.add_argument("--json", default="")
+    a = ap.parse_args()
+    obs = load_obs(a.obs); SG, PR = sigmets(obs), pireps(obs)
+    now = obs[-1][0] if obs else dt.datetime.utcnow()
+    print(f"# 事後検証(観測の記録 {len(obs)} 時間分、{obs[0][0]:%d日%HZ}〜{now:%d日%HZ})" if obs else "# 事後検証(観測の記録がありません)")
+    res = []
+    for f in sorted(glob.glob(os.path.join(a.hist, "*.json")), reverse=True):
+        h = json.load(open(f, encoding="utf-8")); b = h.get("base")
+        if not b or b == a.base or (now - T(b)).total_seconds() > a.hours * 3600: continue
+        cl = [c for c in h.get("claims") or [] if isinstance(c, dict) and c.get("box") and c.get("from") and c.get("to")]
+        print(f"\n## 初期 {b} の回(claims {len(cl)})")
+        r = {"base": b, "claims": [], "unforecast": []}
+        for c in cl:
+            if T(c["from"]) > now: print(f"- {c.get('id')} {c.get('kind')}: まだ先({c['from']}〜)"); continue
+            v, info = judge(c, obs, SG, PR)
+            print(f"- {c.get('id')} {c.get('kind')} 「{c.get('text', '')[:80]}」 {c['from'][8:13]}〜{c['to'][8:13]} → **{v}**")
+            for x in info: print(f"    - {x}")
+            r["claims"].append({"id": c.get("id"), "kind": c.get("kind"), "verdict": v, "info": info})
+        u = unforecast(cl, obs, SG, PR, T(b), min(now, T(b) + dt.timedelta(hours=24)))
+        if u:
+            print("- 予想に無かった事:"); [print(f"    - {x}") for x in u[:30]]
+        r["unforecast"] = u; res.append(r)
+    if not res: print("\n確かめられる前の回がありません(nwp_ai/history に claims のある回が無い)")
+    if a.json: json.dump(res, open(a.json, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+
+if __name__ == "__main__":
+    main()
