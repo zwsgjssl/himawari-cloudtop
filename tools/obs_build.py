@@ -166,7 +166,7 @@ def main():
     rec = day["hours"].get(H.strftime("%HZ"), {})
     jobs = [("ltg", lambda: obs_ltg(H)), ("rad", lambda: obs_rad(H)), ("metar", obs_metar), ("sigmet", obs_sigmet), ("pirep", obs_pirep)]
     for name, fn in jobs:
-        if name in rec: continue
+        if rec.get(name): continue   # 取れている物は取り直さない(空の SIGMET・PIREP は取り直す)
         try:
             v = fn()
             if v is not None: rec[name] = v
