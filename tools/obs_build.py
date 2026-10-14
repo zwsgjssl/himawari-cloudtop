@@ -135,11 +135,7 @@ def obs_sigmet():
 
 def obs_pirep():
     j = awc("pirep", format="json", bbox=f"{LAT0},{LON0},{LAT1},{LON1}", age=1)
-    if not j:   # 確かめ用: アメリカの範囲で数が返るか(bbox の書き方が合っているか)
-        try:
-            u = awc("pirep", format="json", bbox="25,-125,50,-65", age=1)
-            log(f"PIREP: 日本付近 0 通(確かめ: アメリカ {len(u) if isinstance(u, list) else '?'} 通" + (f"、項目 {sorted(u[0].keys())}" if isinstance(u, list) and u and isinstance(u[0], dict) else "") + ")")
-        except Exception as e: log(f"PIREP 確かめ: {e}")
+    # 2026-10-14 確かめ: 同じ書き方でアメリカは 44 通返る(書き方は正しい)。日本付近は PIREP・AIREP がほとんど流れていない(0 通が普通)
     out = []
     for p in j if isinstance(j, list) else []:
         if not isinstance(p, dict): continue
