@@ -112,20 +112,25 @@ def obs_hima(kv):
 
 # v207 ユーザー「答え合わせに UKMET も使えるんじゃない?」→ UKMET(英国気象局の全球モデル。気象庁とは別のモデル)の回ごとに、
 #   解析(T+0)と 12 時間予想(T+12)を 1° の升ごとにまとめて ukmo/<回>.json に(KV の ukmo:meta と ukmo/<回>/<予報時刻>)。新しい回が出たときだけ。
-#   jet = FL300〜450 の最大風速(kt)と その FL、vws = FL250〜450 の上下の層の風の差の最大(kt/1000ft)、ti1 = Ellrod TI1 の最大(×1e-7/s²、FL250〜450)、
+#   jet = FL300〜450 の最大風速(kt)と その FL、vws = FL250〜450 の上下の層の風の差(kt/1000ft)、ti1 = Ellrod TI1(×1e-7/s²、FL250〜450)。vws・ti1 は升の中の 90 パーセンタイルの、一番大きい層の値、
 #   trop = 圏界面の FL(升の平均)、fz = 0℃ の高さ(FL、升の平均)、ice = 湿度 85% 以上・気温 0〜−15℃ の層の FL [下, 上]
 #   T+0 は観測を取り込んだ直後の値なので、ジェット・シアー・圏界面の「実際に近い姿」として事後検証に使う(観測そのものではない)。T+12 は気象庁の予想と比べる 2 つ目のモデル
+UK_V = 2   # まとめ方を変えたら上げる(同じ回でも作り直す)
 def p2fl(p): return (1 - (np.asarray(p, float) / 1013.25) ** 0.190263) * 145442.16 / 100
 def obs_ukmo(kv, d):
     import warnings; warnings.simplefilter("ignore", RuntimeWarning)   # 全部が欠けの升の nanmax
     m = kv.get("ukmo:meta")
     if not m: return
     m = json.loads(m); run = m.get("run_id"); f = os.path.join(d, "ukmo", f"{run}.json")
-    if not run or os.path.exists(f): return
+    if not run: return
+    if os.path.exists(f):
+        try:
+            if json.load(open(f, encoding="utf-8")).get("v") == UK_V: return
+        except Exception: pass
     g, lv = m["grid"], np.array(m["lv"], float); ny, nx, L = g["ny"], g["nx"], len(lv); FL = p2fl(lv)
     lat = g["lat0"] + g["dlat"] * np.arange(ny); lon = g["lon0"] + g["dlon"] * np.arange(nx)
     rows = {i: np.nonzero((lat >= i) & (lat < i + 1))[0] for i in range(LAT0, LAT1)}; cols = {j: np.nonzero((lon >= j) & (lon < j + 1))[0] for j in range(LON0, LON1)}
-    out = {"run": m.get("run"), "model": "UKMET", "unit": {"jet": "kt・FL", "vws": "kt/1000ft", "ti1": "1e-7/s2", "trop": "FL", "fz": "FL", "ice": "FL"}}
+    out = {"v": UK_V, "run": m.get("run"), "model": "UKMET", "unit": {"jet": "kt・FL", "vws": "kt/1000ft", "ti1": "1e-7/s2", "trop": "FL", "fz": "FL", "ice": "FL"}}
     for s in m.get("slices", []):
         if s.get("lead") not in (0, 12): continue
         b = kv.get(s["key"]); ixb = kv.get(s["ix"]) if s.get("ix") else None; rhb = kv.get(s["rh"]) if s.get("rh") else None
@@ -152,11 +157,12 @@ def obs_ukmo(kv, d):
                     if np.isfinite(sj).any():
                         pl = np.nanmax(sj.reshape(L, -1), axis=1); li = int(np.nanargmax(np.where(np.isfinite(pl), pl, -1)))
                         rec["jet"][k] = [int(np.nanmax(sj)), int(round(FL[li] / 10) * 10)]
-                    vw = VW[(slice(None),) + sl]
-                    if np.isfinite(vw).any(): rec["vws"][k] = round(float(np.nanmax(vw)), 1)
+                    # シアー・TI1 は 10km の格子で 1 点だけ飛び抜けることがあるので、升の中の上位 10%(90 パーセンタイル)を層ごとに出して、一番大きい層の値
+                    vw = VW[(slice(None),) + sl].reshape(VW.shape[0], -1)
+                    if np.isfinite(vw).any(): rec["vws"][k] = round(float(np.nanmax(np.nanpercentile(vw, 90, axis=1))), 1)
                     if TI is not None:
-                        t_ = TI[mid][(slice(None),) + sl]
-                        if t_.size: rec["ti1"][k] = round(float(np.nanmax(t_)), 1)
+                        t_ = TI[mid][(slice(None),) + sl].reshape(int(mid.sum()), -1)
+                        if t_.size and np.isfinite(t_).any(): rec["ti1"][k] = round(float(np.nanmax(np.nanpercentile(t_, 90, axis=1))), 1)
                     v = np.nanmean(tpfl[sl])
                     if np.isfinite(v): rec["trop"][k] = int(round(v / 10) * 10)
                     v = np.nanmean(fz[sl])

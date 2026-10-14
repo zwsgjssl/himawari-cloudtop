@@ -111,7 +111,7 @@ def judge(c, obs, SG, PR, UK=()):
     elif k == "cat":
         hit = any("TURB" in str(s.get("hazard", "")).upper() for s in sg) or any(SEV.search(str(p.get("tbInt1") or "")) for p in pr)
         v = "当たり(SIGMET・PIREP)" if hit else "報告なし(当たり外れは決めない)"
-        if not hit and ul: v += "・UKMET 解析では " + ("根拠あり(シアー 6kt/1000ft 以上か TI1 8 以上)" if uv >= 6 or ut >= 8 else "根拠が弱い(シアー・TI1 が小さい)")
+        if not hit and ul: v += "・UKMET 解析では " + ("根拠あり(シアー 6kt/1000ft 以上か TI1 6 以上。TI1 6 = Met Office が使うしきい値)" if uv >= 6 or ut >= 6 else "根拠が弱い(シアー・TI1 が小さい)")
     elif k == "icing":
         hit = any("ICE" in str(s.get("hazard", "")).upper() for s in sg) or any(SEV.search(str(p.get("icgInt1") or "")) for p in pr)
         v = "当たり(SIGMET・PIREP)" if hit else "報告なし(当たり外れは決めない)"
@@ -125,12 +125,12 @@ def judge(c, obs, SG, PR, UK=()):
 
 def unforecast(claims, obs, SG, PR, t0, t1, UK=()):
     out = []
-    for t, r in UK:   # v207 UKMET 解析で強いシアー(TI1 12 以上か 9kt/1000ft 以上)なのに CAT の予想の外
+    for t, r in UK:   # v207 UKMET 解析で強いシアー(TI1 10 以上か 8kt/1000ft 以上。どちらも升の 90 パーセンタイル)なのに CAT の予想の外
         if not (t0 < t <= t1): continue
         n = 0
         for k in sorted(set(r.get("ti1") or {}) | set(r.get("vws") or {})):
             ti, vw = (r.get("ti1") or {}).get(k, 0), (r.get("vws") or {}).get(k, 0)
-            if ti < 12 and vw < 9: continue
+            if ti < 10 and vw < 8: continue
             la, lo = map(int, k.split(","))
             if any(c.get("kind") == "cat" and inbox(c["box"], la + .5, lo + .5) for c in claims): continue
             j = (r.get("jet") or {}).get(k)
