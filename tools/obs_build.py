@@ -115,7 +115,7 @@ def obs_hima(kv):
 #   jet = FL300〜450 の最大風速(kt)と その FL、vws = FL250〜450 の上下の層の風の差(kt/1000ft)、ti1 = Ellrod TI1(×1e-7/s²、FL250〜450)。vws・ti1 は升の中の 90 パーセンタイルの、一番大きい層の値、
 #   trop = 圏界面の FL(升の平均)、fz = 0℃ の高さ(FL、升の平均)、ice = 湿度 85% 以上・気温 0〜−15℃ の層の FL [下, 上]
 #   T+0 は観測を取り込んだ直後の値なので、ジェット・シアー・圏界面の「実際に近い姿」として事後検証に使う(観測そのものではない)。T+12 は気象庁の予想と比べる 2 つ目のモデル
-UK_V = 3   # v208 風向・風向の変わり方・Ri を足した。 まとめ方を変えたら上げる(同じ回でも作り直す)
+UK_V = 4   # v209 絶対渦度(慣性不安定)を足した。v208 風向・風向の変わり方・Ri を足した。 v208 風向・風向の変わり方・Ri を足した。 まとめ方を変えたら上げる(同じ回でも作り直す)
 def p2fl(p): return (1 - (np.asarray(p, float) / 1013.25) ** 0.190263) * 145442.16 / 100
 def obs_ukmo(kv, d):
     import warnings; warnings.simplefilter("ignore", RuntimeWarning)   # 全部が欠けの升の nanmax
@@ -159,7 +159,16 @@ def obs_ukmo(kv, d):
         N2 = 9.81 / ((TH[:-1] + TH[1:]) / 2) * np.diff(TH, axis=0) / dz
         SH2 = ((np.diff(U, axis=0) * 0.5144) ** 2 + (np.diff(V, axis=0) * 0.5144) ** 2) / dz ** 2
         RI = np.where(okv, np.clip(N2 / np.maximum(SH2, 1e-9), -5, 50), np.nan)
-        rec = {"t": s["t"], "jet": {}, "vws": {}, "ti1": {}, "trop": {}, "fz": {}, "ice": {}, "wind": {}, "turn": {}, "ri": {}}
+        # v209 ユーザー「慣性不安定は今回のエリアではどうだった?」→ 絶対渦度 η = ζ + f(×1e-5/s)。北半球で η < 0 = 慣性不安定(高気圧側の CAT の目安。Knox)
+        #   avo = FL300〜450 の層ごとの升の 10 パーセンタイルの一番小さい値と、η < 0 の点の割合(%、一番多い層)
+        R_E, OM = 6.371e6, 7.292e-5
+        yy = np.radians(lat) * R_E; xx = np.radians(lon) * R_E
+        coslat = np.cos(np.radians(lat))[:, None]
+        Um, Vm = U * 0.5144, V * 0.5144
+        dvdx = np.gradient(Vm, xx, axis=2) / coslat; dudy = np.gradient(Um * coslat, yy, axis=1) / coslat
+        ETA = (dvdx - dudy + 2 * OM * np.sin(np.radians(lat))[:, None]) * 1e5
+        ETA = np.where(up[:, None, None], ETA, np.nan)
+        rec = {"t": s["t"], "jet": {}, "vws": {}, "ti1": {}, "trop": {}, "fz": {}, "ice": {}, "wind": {}, "turn": {}, "ri": {}, "avo": {}}
         with np.errstate(all="ignore"):
             for i, ri in rows.items():
                 for j, cj in cols.items():
@@ -185,6 +194,9 @@ def obs_ukmo(kv, d):
                     if np.isfinite(t_).any(): rec["turn"][k] = int(round(float(np.nanmax(np.nanpercentile(t_, 90, axis=1)))))
                     r_ = RI[(slice(None),) + sl].reshape(RI.shape[0], -1)
                     if np.isfinite(r_).any(): rec["ri"][k] = round(float(np.nanmin(np.nanpercentile(r_, 10, axis=1))), 2)
+                    e_ = ETA[(slice(None),) + sl].reshape(L, -1)
+                    if np.isfinite(e_).any():
+                        rec["avo"][k] = [round(float(np.nanmin(np.nanpercentile(e_, 10, axis=1))), 1), int(round(float(np.nanmax(np.nanmean(np.where(np.isfinite(e_), e_ < 0, np.nan), axis=1)) * 100)))]
                     if ic is not None:
                         lay = np.any(ic[(slice(None),) + sl].reshape(L, -1), axis=1)
                         if lay.any(): rec["ice"][k] = [int(FL[lay].min()), int(FL[lay].max())]
