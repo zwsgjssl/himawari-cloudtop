@@ -110,6 +110,67 @@ def obs_hima(kv):
     log(f"赤外 {ir and ir['t']}・雲頂 {ct and ct['t']}")
     return ir, ct
 
+# v207 ユーザー「答え合わせに UKMET も使えるんじゃない?」→ UKMET(英国気象局の全球モデル。気象庁とは別のモデル)の回ごとに、
+#   解析(T+0)と 12 時間予想(T+12)を 1° の升ごとにまとめて ukmo/<回>.json に(KV の ukmo:meta と ukmo/<回>/<予報時刻>)。新しい回が出たときだけ。
+#   jet = FL300〜450 の最大風速(kt)と その FL、vws = FL250〜450 の上下の層の風の差の最大(kt/1000ft)、ti1 = Ellrod TI1 の最大(×1e-7/s²、FL250〜450)、
+#   trop = 圏界面の FL(升の平均)、fz = 0℃ の高さ(FL、升の平均)、ice = 湿度 85% 以上・気温 0〜−15℃ の層の FL [下, 上]
+#   T+0 は観測を取り込んだ直後の値なので、ジェット・シアー・圏界面の「実際に近い姿」として事後検証に使う(観測そのものではない)。T+12 は気象庁の予想と比べる 2 つ目のモデル
+def p2fl(p): return (1 - (np.asarray(p, float) / 1013.25) ** 0.190263) * 145442.16 / 100
+def obs_ukmo(kv, d):
+    import warnings; warnings.simplefilter("ignore", RuntimeWarning)   # 全部が欠けの升の nanmax
+    m = kv.get("ukmo:meta")
+    if not m: return
+    m = json.loads(m); run = m.get("run_id"); f = os.path.join(d, "ukmo", f"{run}.json")
+    if not run or os.path.exists(f): return
+    g, lv = m["grid"], np.array(m["lv"], float); ny, nx, L = g["ny"], g["nx"], len(lv); FL = p2fl(lv)
+    lat = g["lat0"] + g["dlat"] * np.arange(ny); lon = g["lon0"] + g["dlon"] * np.arange(nx)
+    rows = {i: np.nonzero((lat >= i) & (lat < i + 1))[0] for i in range(LAT0, LAT1)}; cols = {j: np.nonzero((lon >= j) & (lon < j + 1))[0] for j in range(LON0, LON1)}
+    out = {"run": m.get("run"), "model": "UKMET", "unit": {"jet": "kt・FL", "vws": "kt/1000ft", "ti1": "1e-7/s2", "trop": "FL", "fz": "FL", "ice": "FL"}}
+    for s in m.get("slices", []):
+        if s.get("lead") not in (0, 12): continue
+        b = kv.get(s["key"]); ixb = kv.get(s["ix"]) if s.get("ix") else None; rhb = kv.get(s["rh"]) if s.get("rh") else None
+        if not b: continue
+        a = np.frombuffer(b, "<i2"); n3 = L * 3 * ny * nx
+        X = a[:n3].reshape(L, 3, ny, nx).astype(float); X[X == -32768] = np.nan; X /= 10
+        T, U, V = X[:, 0], X[:, 1], X[:, 2]; S = np.hypot(U, V)
+        tp = a[n3:n3 + ny * nx].reshape(ny, nx).astype(float); tp[tp == -32768] = np.nan; tpfl = p2fl(tp / 10)
+        TI = np.frombuffer(ixb, "<i2").reshape(L, 1, ny, nx)[:, 0].astype(float) / 10 if ixb else None
+        RH = np.frombuffer(rhb, "u1").reshape(L, ny, nx).astype(float) if rhb else None
+        up = (FL >= 300) & (FL <= 450); mid = (FL >= 250) & (FL <= 450)
+        Sj = np.where(up[:, None, None], S, np.nan)
+        dV = np.hypot(np.diff(U, axis=0), np.diff(V, axis=0)) / (np.diff(FL)[:, None, None] / 10)   # kt / 1000ft
+        okv = (mid[:-1] & mid[1:])[:, None, None]; VW = np.where(okv, dV, np.nan)
+        fzi = np.argmax(T <= 0, axis=0); fz = np.where(np.any(T <= 0, axis=0), FL[fzi], np.nan)
+        ic = (RH >= 85) & (T <= 0) & (T >= -15) if RH is not None else None
+        rec = {"t": s["t"], "jet": {}, "vws": {}, "ti1": {}, "trop": {}, "fz": {}, "ice": {}}
+        with np.errstate(all="ignore"):
+            for i, ri in rows.items():
+                for j, cj in cols.items():
+                    if not len(ri) or not len(cj): continue
+                    k = f"{i},{j}"; sl = np.ix_(ri, cj)
+                    sj = Sj[(slice(None),) + sl]
+                    if np.isfinite(sj).any():
+                        pl = np.nanmax(sj.reshape(L, -1), axis=1); li = int(np.nanargmax(np.where(np.isfinite(pl), pl, -1)))
+                        rec["jet"][k] = [int(np.nanmax(sj)), int(round(FL[li] / 10) * 10)]
+                    vw = VW[(slice(None),) + sl]
+                    if np.isfinite(vw).any(): rec["vws"][k] = round(float(np.nanmax(vw)), 1)
+                    if TI is not None:
+                        t_ = TI[mid][(slice(None),) + sl]
+                        if t_.size: rec["ti1"][k] = round(float(np.nanmax(t_)), 1)
+                    v = np.nanmean(tpfl[sl])
+                    if np.isfinite(v): rec["trop"][k] = int(round(v / 10) * 10)
+                    v = np.nanmean(fz[sl])
+                    if np.isfinite(v): rec["fz"][k] = int(round(v / 5) * 5)
+                    if ic is not None:
+                        lay = np.any(ic[(slice(None),) + sl].reshape(L, -1), axis=1)
+                        if lay.any(): rec["ice"][k] = [int(FL[lay].min()), int(FL[lay].max())]
+        out["t0" if s["lead"] == 0 else "f12"] = rec
+    if "t0" not in out: return
+    os.makedirs(os.path.dirname(f), exist_ok=True); json.dump(out, open(f, "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
+    ud = os.path.dirname(f)
+    for old in sorted(os.listdir(ud))[:-12]: os.remove(os.path.join(ud, old))   # 3 日分(1 日 4 回)
+    log(f"UKMET {run}: 升 {len(out['t0']['jet'])}、最大風速 {max(v[0] for v in out['t0']['jet'].values()) if out['t0']['jet'] else '-'}kt")
+
 def awc(path, **params):
     r = requests.get(AWC + path, params=params, headers=UA, timeout=60)
     if r.status_code == 204: return []
@@ -176,6 +237,8 @@ def main():
             if ir: rec["irmin"] = ir
             if ct: rec["ctop"] = ct
         except Exception as e: log(f"赤外・雲頂: 取れませんでした {e}")
+    try: obs_ukmo(KV(a.dry_kv or None), a.dir)
+    except Exception as e: log(f"UKMET: まとめられませんでした {e}")
     try: sigmet_png(a.dir)
     except Exception as e: log(f"SIGMET の図: 取れませんでした {e}")
     rec["at"] = now.strftime("%Y-%m-%dT%H:%MZ")

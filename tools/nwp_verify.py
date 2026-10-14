@@ -65,7 +65,30 @@ def pireps(obs):
             seen.add(k); out.append(p)
     return out
 
-def judge(c, obs, SG, PR):
+# v207 UKMET の解析(T+0)。ジェット・シアー・圏界面・着氷層の「実際に近い姿」(モデルの値で、観測そのものではない)
+def load_ukmo(d):
+    out = []
+    for f in sorted(glob.glob(os.path.join(d, "ukmo", "*.json"))):
+        try: u = json.load(open(f, encoding="utf-8"))
+        except Exception: continue
+        if u.get("t0") and u["t0"].get("t"): out.append((T(u["t0"]["t"]), u["t0"]))
+    return out
+def uk_box(c, recs):
+    """claim の範囲・時間にある UKMET 解析の まとめ文と (最大シアー, 最大 TI1)"""
+    f0, f1 = T(c["from"]), T(c["to"]); cs = set(cells(c["box"])); lines, vmax, tmax = [], 0.0, 0.0
+    for t, r in recs:
+        if not (f0 - dt.timedelta(hours=3) <= t <= f1 + dt.timedelta(hours=3)): continue
+        jet = [v for k, v in (r.get("jet") or {}).items() if k in cs and fl_ok(c, v[1], v[1])]
+        vw = max([v for k, v in (r.get("vws") or {}).items() if k in cs] or [0]); ti = max([v for k, v in (r.get("ti1") or {}).items() if k in cs] or [0])
+        tr = [v for k, v in (r.get("trop") or {}).items() if k in cs]; ic = [v for k, v in (r.get("ice") or {}).items() if k in cs]
+        j = max(jet, key=lambda x: x[0]) if jet else None
+        if not j and not vw and not ti and not ic: continue
+        lines.append(f"UKMET 解析 {t:%d日%HZ}: " + (f"最大風速 {j[0]}kt(FL{j[1]})・" if j else "") + f"鉛直シアー最大 {vw}kt/1000ft・TI1 最大 {ti}"
+                     + (f"・圏界面 FL{min(tr)}〜{max(tr)}" if tr else "") + (f"・着氷しやすい層 FL{min(x[0] for x in ic)}〜{max(x[1] for x in ic)}" if ic else ""))
+        vmax, tmax = max(vmax, vw), max(tmax, ti)
+    return lines, vmax, tmax
+
+def judge(c, obs, SG, PR, UK=()):
     f0, f1 = T(c["from"]), T(c["to"]); b = c["box"]; cs = set(cells(b))
     hrs = [(h, r) for h, r in obs if f0 < h <= f1 + dt.timedelta(hours=1)]
     if not hrs: return "観測の記録なし(分からない)", []
@@ -80,12 +103,15 @@ def judge(c, obs, SG, PR):
     for s in sg: info.append(f"SIGMET {s.get('hazard')} {s.get('qualifier') or ''} FL{fl(s.get('base'))}〜{fl(s.get('top'))}: {str(s.get('rawSigmet') or '')[:120]}")
     for p in pr:
         if p.get("tbInt1") or p.get("icgInt1"): info.append(f"PIREP {p.get('obsTime')} FL{fl(p.get('fltLvl'))} {p.get('acType') or ''} 揺れ {p.get('tbInt1') or '-'} 着氷 {p.get('icgInt1') or '-'}")
+    ul, uv, ut = uk_box(c, UK)
+    if c.get("kind") != "cb": info += ul   # CB は雷・レーダー・赤外で決める
     k = c.get("kind")
     if k == "cb":
         v = "当たり" if (ltg >= 1 or rmx >= 5 or irm <= 215) else "外れ(雷・強い雨・冷たい雲頂なし)"
     elif k == "cat":
         hit = any("TURB" in str(s.get("hazard", "")).upper() for s in sg) or any(SEV.search(str(p.get("tbInt1") or "")) for p in pr)
         v = "当たり(SIGMET・PIREP)" if hit else "報告なし(当たり外れは決めない)"
+        if not hit and ul: v += "・UKMET 解析では " + ("根拠あり(シアー 6kt/1000ft 以上か TI1 8 以上)" if uv >= 6 or ut >= 8 else "根拠が弱い(シアー・TI1 が小さい)")
     elif k == "icing":
         hit = any("ICE" in str(s.get("hazard", "")).upper() for s in sg) or any(SEV.search(str(p.get("icgInt1") or "")) for p in pr)
         v = "当たり(SIGMET・PIREP)" if hit else "報告なし(当たり外れは決めない)"
@@ -97,8 +123,20 @@ def judge(c, obs, SG, PR):
                     info.append(f"METAR {m.get('raw')}")
     return v, list(dict.fromkeys(info))   # 同じ行は 1 つに
 
-def unforecast(claims, obs, SG, PR, t0, t1):
+def unforecast(claims, obs, SG, PR, t0, t1, UK=()):
     out = []
+    for t, r in UK:   # v207 UKMET 解析で強いシアー(TI1 12 以上か 9kt/1000ft 以上)なのに CAT の予想の外
+        if not (t0 < t <= t1): continue
+        n = 0
+        for k in sorted(set(r.get("ti1") or {}) | set(r.get("vws") or {})):
+            ti, vw = (r.get("ti1") or {}).get(k, 0), (r.get("vws") or {}).get(k, 0)
+            if ti < 12 and vw < 9: continue
+            la, lo = map(int, k.split(","))
+            if any(c.get("kind") == "cat" and inbox(c["box"], la + .5, lo + .5) for c in claims): continue
+            j = (r.get("jet") or {}).get(k)
+            if n < 8: out.append(f"UKMET 解析 {t:%d日%HZ} 北緯{la}〜{la+1}・東経{lo}〜{lo+1}: TI1 {ti}・シアー {vw}kt/1000ft" + (f"・最大風速 {j[0]}kt(FL{j[1]})" if j else "") + " が CAT の予想の外")
+            n += 1
+        if n > 8: out.append(f"(ほかに {n - 8} 升)")
     cb = [c for c in claims if c.get("kind") == "cb"]
     for h, r in obs:
         if not (t0 < h <= t1): continue
@@ -129,7 +167,7 @@ def main():
     ap.add_argument("--hours", type=int, default=48, help="何時間前の回まで")
     ap.add_argument("--json", default="")
     a = ap.parse_args()
-    obs = load_obs(a.obs); SG, PR = sigmets(obs), pireps(obs)
+    obs = load_obs(a.obs); SG, PR = sigmets(obs), pireps(obs); UK = load_ukmo(a.obs)
     now = obs[-1][0] if obs else dt.datetime.utcnow()
     print(f"# 事後検証(観測の記録 {len(obs)} 時間分、{obs[0][0]:%d日%HZ}〜{now:%d日%HZ})" if obs else "# 事後検証(観測の記録がありません)")
     res = []
@@ -141,11 +179,11 @@ def main():
         r = {"base": b, "claims": [], "unforecast": []}
         for c in cl:
             if T(c["from"]) > now: print(f"- {c.get('id')} {c.get('kind')}: まだ先({c['from']}〜)"); continue
-            v, info = judge(c, obs, SG, PR)
+            v, info = judge(c, obs, SG, PR, UK)
             print(f"- {c.get('id')} {c.get('kind')} 「{c.get('text', '')[:80]}」 {c['from'][8:13]}〜{c['to'][8:13]} → **{v}**")
             for x in info: print(f"    - {x}")
             r["claims"].append({"id": c.get("id"), "kind": c.get("kind"), "verdict": v, "info": info})
-        u = unforecast(cl, obs, SG, PR, T(b), min(now, T(b) + dt.timedelta(hours=24)))
+        u = unforecast(cl, obs, SG, PR, T(b), min(now, T(b) + dt.timedelta(hours=24)), UK)
         if u:
             print("- 予想に無かった事:"); [print(f"    - {x}") for x in u[:30]]
         r["unforecast"] = u; res.append(r)
