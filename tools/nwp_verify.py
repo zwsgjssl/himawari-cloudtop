@@ -244,8 +244,18 @@ def main():
             for tt, k, run, u in near:
                 th = uk_th(u); vw = max([u["vws"].get(x, 0) for x in cs] or [0]); ti = max([u["ti1"].get(x, 0) for x in cs] or [0])
                 jet = [u["jet"][x] for x in cs if x in u.get("jet", {})]; tr = [u["trop"][x] for x in cs if x in u.get("trop", {})]
+                tn = max([u.get("turn", {}).get(x, 0) for x in cs] or [0]); ri = [u["ri"][x] for x in cs if x in u.get("ri", {})]
                 print(f"    - UKMET {'解析' if k == 't0' else '12 時間予想'}(回 {run}、{tt:%d日%HZ}): シアー {vw}(上位 10% の目安 {th['vw90']})・TI1 {ti}(目安 {th['ti90']})"
-                      + (f"・最大風速 {max(jet)[0]}kt(FL{max(jet)[1]})" if jet else "") + (f"・圏界面 FL{min(tr)}〜{max(tr)}" if tr else ""))
+                      + (f"・最大風速 {max(jet)[0]}kt(FL{max(jet)[1]})" if jet else "") + (f"・圏界面 FL{min(tr)}〜{max(tr)}" if tr else "")
+                      + (f"・上下の層の風向の変わり 最大 {tn}°" if "turn" in u else "") + (f"・Ri 最小 {min(ri)}(0.25 未満 = 乱れやすい)" if ri else ""))
+                # v208 区間の升ごとの風(報告の FL に近い高さ)。風向が区間の中でどう変わるか(水平の変わり方)を見る
+                if u.get("wind"):
+                    fls = [300, 340, 360, 390, 410]; li = min(range(len(fls)), key=lambda q: abs(fls[q] - (r.get("fl") or 380)))
+                    seq = []
+                    for la, lo in seg[::max(1, len(seg) // 6)] + [seg[-1]]:
+                        x = f"{int(la // 1)},{int(lo // 1)}"
+                        if x in u["wind"] and (not seq or seq[-1][0] != x): seq.append((x, u["wind"][x][li]))
+                    if seq: print(f"      区間の風(FL{fls[li]}、升の平均): " + " → ".join(f"{d:03d}°/{sp}kt" for _, (d, sp) in seq))
     if a.json: json.dump(res, open(a.json, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
 if __name__ == "__main__":

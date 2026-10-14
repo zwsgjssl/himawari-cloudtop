@@ -115,7 +115,7 @@ def obs_hima(kv):
 #   jet = FL300〜450 の最大風速(kt)と その FL、vws = FL250〜450 の上下の層の風の差(kt/1000ft)、ti1 = Ellrod TI1(×1e-7/s²、FL250〜450)。vws・ti1 は升の中の 90 パーセンタイルの、一番大きい層の値、
 #   trop = 圏界面の FL(升の平均)、fz = 0℃ の高さ(FL、升の平均)、ice = 湿度 85% 以上・気温 0〜−15℃ の層の FL [下, 上]
 #   T+0 は観測を取り込んだ直後の値なので、ジェット・シアー・圏界面の「実際に近い姿」として事後検証に使う(観測そのものではない)。T+12 は気象庁の予想と比べる 2 つ目のモデル
-UK_V = 2   # まとめ方を変えたら上げる(同じ回でも作り直す)
+UK_V = 3   # v208 風向・風向の変わり方・Ri を足した。 まとめ方を変えたら上げる(同じ回でも作り直す)
 def p2fl(p): return (1 - (np.asarray(p, float) / 1013.25) ** 0.190263) * 145442.16 / 100
 def obs_ukmo(kv, d):
     import warnings; warnings.simplefilter("ignore", RuntimeWarning)   # 全部が欠けの升の nanmax
@@ -130,7 +130,7 @@ def obs_ukmo(kv, d):
     g, lv = m["grid"], np.array(m["lv"], float); ny, nx, L = g["ny"], g["nx"], len(lv); FL = p2fl(lv)
     lat = g["lat0"] + g["dlat"] * np.arange(ny); lon = g["lon0"] + g["dlon"] * np.arange(nx)
     rows = {i: np.nonzero((lat >= i) & (lat < i + 1))[0] for i in range(LAT0, LAT1)}; cols = {j: np.nonzero((lon >= j) & (lon < j + 1))[0] for j in range(LON0, LON1)}
-    out = {"v": UK_V, "run": m.get("run"), "model": "UKMET", "unit": {"jet": "kt・FL", "vws": "kt/1000ft", "ti1": "1e-7/s2", "trop": "FL", "fz": "FL", "ice": "FL"}}
+    out = {"v": UK_V, "run": m.get("run"), "model": "UKMET", "wind_fl": [300, 340, 360, 390, 410], "unit": {"jet": "kt・FL", "vws": "kt/1000ft", "ti1": "1e-7/s2", "trop": "FL", "fz": "FL", "ice": "FL"}}
     for s in m.get("slices", []):
         if s.get("lead") not in (0, 12): continue
         b = kv.get(s["key"]); ixb = kv.get(s["ix"]) if s.get("ix") else None; rhb = kv.get(s["rh"]) if s.get("rh") else None
@@ -147,7 +147,19 @@ def obs_ukmo(kv, d):
         okv = (mid[:-1] & mid[1:])[:, None, None]; VW = np.where(okv, dV, np.nan)
         fzi = np.argmax(T <= 0, axis=0); fz = np.where(np.any(T <= 0, axis=0), FL[fzi], np.nan)
         ic = (RH >= 85) & (T <= 0) & (T >= -15) if RH is not None else None
-        rec = {"t": s["t"], "jet": {}, "vws": {}, "ti1": {}, "trop": {}, "fz": {}, "ice": {}}
+        # v208 ユーザー「風速は弱いけど風向が変わるからだと思う」→ 風向とその変わり方、リチャードソン数(Ri)も
+        #   wind = 升の平均の風 [風向°, kt] を 300・250・225・200・175hPa(≈FL300・340・360・390・410)で
+        #   turn = FL300〜450 の上下の層で風向が何度変わるか(どちらの層も 5kt 以上の所。升の 90 パーセンタイル)
+        #   ri = FL300〜450 の上下の層の Ri(安定度 ÷ シアーの 2 乗。小さいほど揺れやすい、0.25 未満は乱れやすい目安。升の 10 パーセンタイルの一番小さい層)
+        WLV = [k for k, p in enumerate(lv) if p in (300, 250, 225, 200, 175)]
+        A1, A2 = np.degrees(np.arctan2(U[:-1], V[:-1])), np.degrees(np.arctan2(U[1:], V[1:]))
+        TRN = np.abs((A2 - A1 + 180) % 360 - 180); TRN = np.where((S[:-1] >= 5) & (S[1:] >= 5) & okv, TRN, np.nan)
+        TH = (T + 273.15) * (1000 / lv[:, None, None]) ** 0.2857
+        dz = 287 * ((T[:-1] + T[1:]) / 2 + 273.15) / 9.81 * np.log(lv[:-1, None, None] / lv[1:, None, None])
+        N2 = 9.81 / ((TH[:-1] + TH[1:]) / 2) * np.diff(TH, axis=0) / dz
+        SH2 = ((np.diff(U, axis=0) * 0.5144) ** 2 + (np.diff(V, axis=0) * 0.5144) ** 2) / dz ** 2
+        RI = np.where(okv, np.clip(N2 / np.maximum(SH2, 1e-9), -5, 50), np.nan)
+        rec = {"t": s["t"], "jet": {}, "vws": {}, "ti1": {}, "trop": {}, "fz": {}, "ice": {}, "wind": {}, "turn": {}, "ri": {}}
         with np.errstate(all="ignore"):
             for i, ri in rows.items():
                 for j, cj in cols.items():
@@ -167,6 +179,12 @@ def obs_ukmo(kv, d):
                     if np.isfinite(v): rec["trop"][k] = int(round(v / 10) * 10)
                     v = np.nanmean(fz[sl])
                     if np.isfinite(v): rec["fz"][k] = int(round(v / 5) * 5)
+                    uu = np.nanmean(U[WLV][(slice(None),) + sl].reshape(len(WLV), -1), axis=1); vv = np.nanmean(V[WLV][(slice(None),) + sl].reshape(len(WLV), -1), axis=1)
+                    if np.isfinite(uu).all(): rec["wind"][k] = [[int(round((np.degrees(np.arctan2(-a_, -b_)) + 360) % 360)), int(round(np.hypot(a_, b_)))] for a_, b_ in zip(uu, vv)]
+                    t_ = TRN[(slice(None),) + sl].reshape(TRN.shape[0], -1)
+                    if np.isfinite(t_).any(): rec["turn"][k] = int(round(float(np.nanmax(np.nanpercentile(t_, 90, axis=1)))))
+                    r_ = RI[(slice(None),) + sl].reshape(RI.shape[0], -1)
+                    if np.isfinite(r_).any(): rec["ri"][k] = round(float(np.nanmin(np.nanpercentile(r_, 10, axis=1))), 2)
                     if ic is not None:
                         lay = np.any(ic[(slice(None),) + sl].reshape(L, -1), axis=1)
                         if lay.any(): rec["ice"][k] = [int(FL[lay].min()), int(FL[lay].max())]
