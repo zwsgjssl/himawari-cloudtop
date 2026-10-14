@@ -58,8 +58,10 @@ jobs:
         run: |
           cd nwp_img
           git init -q && git checkout -q -b nwp-img && git add -A
+          du -sh . ; ls | head -40   # 確かめ用(大きさ・中身)
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -qm "nwp images $(date -u +%Y-%m-%dT%H:%MZ)"
-          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" nwp-img
+          # v209 14日16:22Z にこの段だけ失敗し(理由はログが見られず不明、6 秒で終わった)、17:10Z の定時の Claude の解析が古い図のままで止まった → 3 回まで取り直す
+          for i in 1 2 3; do git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" nwp-img && exit 0; echo "push に失敗 ($i 回目)"; sleep 15; done; exit 1
       # v206 事後検証用の観測の記録(雷・レーダー・赤外・雲頂・METAR・SIGMET・PIREP)を毎時ブランチ nwp-obs に(tools/obs_build.py。3 日分)
       - name: Observations for verification
         if: always()
@@ -74,4 +76,4 @@ jobs:
           cd nwp_obs
           rm -rf .git && git init -q && git checkout -q -b nwp-obs && git add -A
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -qm "obs $(date -u +%Y-%m-%dT%H:%MZ)"
-          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" nwp-obs
+          for i in 1 2 3; do git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" nwp-obs && exit 0; echo "push に失敗 ($i 回目)"; sleep 15; done; exit 1
