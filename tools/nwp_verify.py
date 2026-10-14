@@ -15,7 +15,7 @@ def T(s): return dt.datetime.strptime(s.replace("-", "").replace(":", "")[:13], 
 def ep(v):
     """SIGMET の時刻(秒・ミリ秒・ISO 文字列)→ datetime"""
     if v is None: return None
-    if isinstance(v, (int, float)): return dt.datetime.utcfromtimestamp(v / 1000 if v > 1e11 else v)
+    if isinstance(v, (int, float)): return dt.datetime.fromtimestamp(v / 1000 if v > 1e11 else v, dt.timezone.utc).replace(tzinfo=None)
     try: return dt.datetime.fromisoformat(str(v).replace("Z", "")).replace(tzinfo=None)
     except ValueError: return None
 def fl(v):
@@ -168,6 +168,28 @@ def unforecast(claims, obs, SG, PR, t0, t1, UK=()):
                 out.append(f"PIREP {t:%d日%H%MZ} FL{fl(p.get('fltLvl'))} {'揺れ' if kind == 'cat' else '着氷'} {p.get(key)}(北緯{p.get('lat')}・東経{p.get('lon')})が予想の外")
     return out
 
+# v208 ユーザー(787 の機長)が実際に飛んで感じた揺れの報告(nwp_ai/pilot_reports.json)。社内の PIREP は使わず、本人が言った物だけ。
+#   [{"t":"2026-10-14T17:00Z","from":"AVLAS","to":"TUNTO","pts":[[緯度,経度],…](区間の両端),"fl":380,"tb":"LM-L","note":"…"}]
+#   強さ: LM = light minus、L = light、LP = light plus、MOD = moderate、SEV = severe(ユーザーの社内の言い方)。
+#   PIREP と同じ扱い(区間を 0.25° ごとの点に)。MOD 以上は CAT の当たり・予想外の判定に入る。LM〜LP は「弱い揺れの報告」として出す
+TB_EN = {"LM": "LGT-", "L": "LGT", "LP": "LGT+", "MOD": "MOD", "SEV": "SEV"}
+def pilot(path):
+    out, rep = [], []
+    try: L = json.load(open(path, encoding="utf-8")) if path and os.path.exists(path) else []
+    except Exception: L = []
+    for r in L:
+        pts = r.get("pts") or []
+        if not pts or not r.get("t"): continue
+        tb = "-".join(TB_EN.get(x.strip().upper(), x) for x in str(r.get("tb", "")).split("-"))
+        seg = []
+        for (a, b), (c, d) in zip(pts, pts[1:] or pts):
+            n = max(1, int(max(abs(c - a), abs(d - b)) / 0.25))
+            seg += [(a + (c - a) * i / n, b + (d - b) * i / n) for i in range(n + 1)]
+        for la, lo in seg:
+            out.append({"obsTime": r["t"].replace("Z", ":00"), "lat": la, "lon": lo, "fltLvl": r.get("fl"), "tbInt1": tb, "acType": "B787(本人)", "rawOb": f"本人 {r['t']} {r.get('from', '')}-{r.get('to', '')} FL{r.get('fl')} {r.get('tb')} {la:.2f},{lo:.2f}"})
+        rep.append((r, seg, tb))
+    return out, rep
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--obs", required=True, help="ブランチ nwp-obs の中身のフォルダ")
@@ -175,8 +197,10 @@ def main():
     ap.add_argument("--base", default="", help="今の回(これより前の回を確かめる)")
     ap.add_argument("--hours", type=int, default=48, help="何時間前の回まで")
     ap.add_argument("--json", default="")
+    ap.add_argument("--pilot", default="nwp_ai/pilot_reports.json", help="ユーザー本人の揺れの報告")
     a = ap.parse_args()
     obs = load_obs(a.obs); SG, PR = sigmets(obs), pireps(obs); UK = load_ukmo(a.obs)
+    PP, REP = pilot(a.pilot); PR = PR + PP
     now = obs[-1][0] if obs else dt.datetime.utcnow()
     print(f"# 事後検証(観測の記録 {len(obs)} 時間分、{obs[0][0]:%d日%HZ}〜{now:%d日%HZ})" if obs else "# 事後検証(観測の記録がありません)")
     res = []
@@ -197,6 +221,31 @@ def main():
             print("- 予想に無かった事:"); [print(f"    - {x}") for x in u[:30]]
         r["unforecast"] = u; res.append(r)
     if not res: print("\n確かめられる前の回がありません(nwp_ai/history に claims のある回が無い)")
+    # v208 本人の揺れの報告ごとに: どの回のどの CAT の予想に入っていたか、その時刻に近い UKMET(解析 t0 か 12 時間予想 f12)の値
+    if REP:
+        print("\n## Hiroki さん(787 の機長)本人の揺れの報告")
+        hs = {}
+        for f in glob.glob(os.path.join(a.hist, "*.json")):
+            try: h = json.load(open(f, encoding="utf-8")); hs[h.get("base")] = [c for c in h.get("claims") or [] if isinstance(c, dict) and c.get("box")]
+            except Exception: pass
+        ukall = []
+        for f in sorted(glob.glob(os.path.join(a.obs, "ukmo", "*.json"))):
+            try: u = json.load(open(f, encoding="utf-8"))
+            except Exception: continue
+            for k in ("t0", "f12"):
+                if u.get(k) and u[k].get("t"): ukall.append((T(u[k]["t"]), k, u.get("run"), u[k]))
+        for r, seg, tb in REP:
+            t = T(r["t"]); cs = {f"{int(la // 1)},{int(lo // 1)}" for la, lo in seg}
+            print(f"- {r['t']} {r.get('from', '')}〜{r.get('to', '')} FL{r.get('fl')} 揺れ {r.get('tb')}({tb})" + (f" {r.get('note')}" if r.get("note") else ""))
+            hit = [(b, c) for b, cl in hs.items() for c in cl if c.get("kind") == "cat" and T(c["from"]) <= t <= T(c["to"]) + dt.timedelta(hours=1)
+                   and any(inbox(c["box"], la, lo) for la, lo in seg) and fl_ok(c, r.get("fl"), r.get("fl"))]
+            print("    - CAT の予想: " + ("; ".join(f"初期 {b} の {c.get('id')}「{c.get('text', '')[:50]}」" for b, c in hit) if hit else "どの回の CAT の予想にも入っていない"))
+            near = sorted(ukall, key=lambda x: (abs((x[0] - t).total_seconds()), x[1] != "t0"))[:2]   # 近い時刻。同じなら解析を先に
+            for tt, k, run, u in near:
+                th = uk_th(u); vw = max([u["vws"].get(x, 0) for x in cs] or [0]); ti = max([u["ti1"].get(x, 0) for x in cs] or [0])
+                jet = [u["jet"][x] for x in cs if x in u.get("jet", {})]; tr = [u["trop"][x] for x in cs if x in u.get("trop", {})]
+                print(f"    - UKMET {'解析' if k == 't0' else '12 時間予想'}(回 {run}、{tt:%d日%HZ}): シアー {vw}(上位 10% の目安 {th['vw90']})・TI1 {ti}(目安 {th['ti90']})"
+                      + (f"・最大風速 {max(jet)[0]}kt(FL{max(jet)[1]})" if jet else "") + (f"・圏界面 FL{min(tr)}〜{max(tr)}" if tr else ""))
     if a.json: json.dump(res, open(a.json, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
 if __name__ == "__main__":
