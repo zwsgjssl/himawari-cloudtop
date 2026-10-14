@@ -35,7 +35,7 @@ jobs:
       - name: Install
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
-          pip install --quiet requests pillow
+          pip install --quiet requests pillow numpy
       - name: Build and upload
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
@@ -70,7 +70,7 @@ jobs:
         run: |
           mkdir -p nwp_obs
           if git fetch -q --depth 1 origin +refs/heads/nwp-obs:refs/remotes/origin/nwp-obs 2>/dev/null; then git archive origin/nwp-obs | tar -x -C nwp_obs; fi
-          python3 -u tools/obs_build.py --dir nwp_obs
+          python3 -u tools/obs_build.py --dir nwp_obs 2>&1 | tee nwp_obs/last_log.txt || true
           cd nwp_obs
           rm -rf .git && git init -q && git checkout -q -b nwp-obs && git add -A
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -qm "obs $(date -u +%Y-%m-%dT%H:%MZ)"
