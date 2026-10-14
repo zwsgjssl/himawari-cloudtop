@@ -73,9 +73,16 @@ def load_ukmo(d):
         except Exception: continue
         if u.get("t0") and u["t0"].get("t"): out.append((T(u["t0"]["t"]), u["t0"]))
     return out
+def pct(vals, q):
+    v = sorted(vals); return v[min(len(v) - 1, int(len(v) * q))] if v else 0
+# 2026-10-14 本物で確かめ: 10km の格子・25hPa の層の厚さだと TI1・シアーの値が大きく出る(升の 90 パーセンタイルの中央値が TI1 6・シアー 5.4kt/1000ft)。
+#   決まったしきい値ではなく、その時刻の日本付近全体の中での順位で見る: 上位 10% = 根拠あり、上位 3% = 強い
+def uk_th(r):
+    ti, vw = list((r.get("ti1") or {}).values()), list((r.get("vws") or {}).values())
+    return {"ti90": pct(ti, .9), "vw90": pct(vw, .9), "ti97": pct(ti, .97), "vw97": pct(vw, .97)}
 def uk_box(c, recs):
     """claim の範囲・時間にある UKMET 解析の まとめ文と (最大シアー, 最大 TI1)"""
-    f0, f1 = T(c["from"]), T(c["to"]); cs = set(cells(c["box"])); lines, vmax, tmax = [], 0.0, 0.0
+    f0, f1 = T(c["from"]), T(c["to"]); cs = set(cells(c["box"])); lines, hit = [], False
     for t, r in recs:
         if not (f0 - dt.timedelta(hours=3) <= t <= f1 + dt.timedelta(hours=3)): continue
         jet = [v for k, v in (r.get("jet") or {}).items() if k in cs and fl_ok(c, v[1], v[1])]
@@ -85,8 +92,10 @@ def uk_box(c, recs):
         if not j and not vw and not ti and not ic: continue
         lines.append(f"UKMET 解析 {t:%d日%HZ}: " + (f"最大風速 {j[0]}kt(FL{j[1]})・" if j else "") + f"鉛直シアー最大 {vw}kt/1000ft・TI1 最大 {ti}"
                      + (f"・圏界面 FL{min(tr)}〜{max(tr)}" if tr else "") + (f"・着氷しやすい層 FL{min(x[0] for x in ic)}〜{max(x[1] for x in ic)}" if ic else ""))
-        vmax, tmax = max(vmax, vw), max(tmax, ti)
-    return lines, vmax, tmax
+        th = uk_th(r)
+        if ti >= th["ti90"] or vw >= th["vw90"]: hit = True
+        lines[-1] += f"(この時刻の上位 10% の目安: TI1 {th['ti90']}・シアー {th['vw90']})"
+    return lines, hit
 
 def judge(c, obs, SG, PR, UK=()):
     f0, f1 = T(c["from"]), T(c["to"]); b = c["box"]; cs = set(cells(b))
@@ -103,7 +112,7 @@ def judge(c, obs, SG, PR, UK=()):
     for s in sg: info.append(f"SIGMET {s.get('hazard')} {s.get('qualifier') or ''} FL{fl(s.get('base'))}〜{fl(s.get('top'))}: {str(s.get('rawSigmet') or '')[:120]}")
     for p in pr:
         if p.get("tbInt1") or p.get("icgInt1"): info.append(f"PIREP {p.get('obsTime')} FL{fl(p.get('fltLvl'))} {p.get('acType') or ''} 揺れ {p.get('tbInt1') or '-'} 着氷 {p.get('icgInt1') or '-'}")
-    ul, uv, ut = uk_box(c, UK)
+    ul, uhit = uk_box(c, UK)
     if c.get("kind") != "cb": info += ul   # CB は雷・レーダー・赤外で決める
     k = c.get("kind")
     if k == "cb":
@@ -111,7 +120,7 @@ def judge(c, obs, SG, PR, UK=()):
     elif k == "cat":
         hit = any("TURB" in str(s.get("hazard", "")).upper() for s in sg) or any(SEV.search(str(p.get("tbInt1") or "")) for p in pr)
         v = "当たり(SIGMET・PIREP)" if hit else "報告なし(当たり外れは決めない)"
-        if not hit and ul: v += "・UKMET 解析では " + ("根拠あり(シアー 6kt/1000ft 以上か TI1 6 以上。TI1 6 = Met Office が使うしきい値)" if uv >= 6 or ut >= 6 else "根拠が弱い(シアー・TI1 が小さい)")
+        if not hit and ul: v += "・UKMET 解析では " + ("根拠あり(シアーか TI1 が日本付近の上位 10%)" if uhit else "根拠が弱い(シアー・TI1 が日本付近の上位 10% に入らない)")
     elif k == "icing":
         hit = any("ICE" in str(s.get("hazard", "")).upper() for s in sg) or any(SEV.search(str(p.get("icgInt1") or "")) for p in pr)
         v = "当たり(SIGMET・PIREP)" if hit else "報告なし(当たり外れは決めない)"
@@ -125,12 +134,12 @@ def judge(c, obs, SG, PR, UK=()):
 
 def unforecast(claims, obs, SG, PR, t0, t1, UK=()):
     out = []
-    for t, r in UK:   # v207 UKMET 解析で強いシアー(TI1 10 以上か 8kt/1000ft 以上。どちらも升の 90 パーセンタイル)なのに CAT の予想の外
+    for t, r in UK:   # v207 UKMET 解析で強いシアー(TI1 がその時刻の日本付近の上位 3%、シアーも上位 10%)なのに CAT の予想の外
         if not (t0 < t <= t1): continue
-        n = 0
+        n = 0; th = uk_th(r)
         for k in sorted(set(r.get("ti1") or {}) | set(r.get("vws") or {})):
             ti, vw = (r.get("ti1") or {}).get(k, 0), (r.get("vws") or {}).get(k, 0)
-            if ti < 10 and vw < 8: continue
+            if not (ti >= th["ti97"] and vw >= th["vw90"]): continue   # TI1 が上位 3% でシアーも上位 10%
             la, lo = map(int, k.split(","))
             if any(c.get("kind") == "cat" and inbox(c["box"], la + .5, lo + .5) for c in claims): continue
             j = (r.get("jet") or {}).get(k)
