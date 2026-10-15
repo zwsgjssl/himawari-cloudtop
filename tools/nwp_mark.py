@@ -15,6 +15,12 @@
 #   python3 tools/nwp_mark.py band <半幅px> x1,y1 x2,y2 …
 #       曲がった帯(相当温位の集中帯・シアーの帯など)の真ん中の線の点と半幅から、帯を囲む poly の pts(JSON)を出す。
 #       線の束の真ん中を 10〜20 点でなぞり、半幅は束の太さの半分(多くは 10〜20px)。折れ曲がり・北東への続きも点を足してなぞる。
+#   python3 tools/nwp_mark.py snap <図.png> x1,y1 x2,y2 … [-o 確認.png]
+#       v217 ユーザーが FXJP854 に手で塗った見本(線の束そのものだけを細くなぞる)に合わせる道具。集中帯・シアーの帯は band ではなくこれを使う。
+#       束の真ん中あたりを 20〜40px おきの点でおおまかになぞる(±25px ずれていてよい)と、各点で直角方向に図の黒い線を数え、
+#       間隔 5px 以内で並ぶ 3 本以上の線のかたまり(= 束)の外側の線にぴったり沿う poly の pts(JSON)を出す。
+#       S 字・折り返しは、曲がりに沿って点を細かく(10〜20px おき)置く。隣の枝に飛ばないよう、折り返しの内側を通らない。
+#       -o を付けると、図に重ねた 3 倍の確認画像を出す。必ず Read で見て、束からはみ出し・束の取りこぼしが無いか確かめる。
 import argparse, json, math, os, sys
 from PIL import Image, ImageDraw, ImageFont
 
@@ -73,6 +79,65 @@ def band(w, pts):
         nx, ny = -dy / n, dx / n; L.append([round(x + nx * w), round(y + ny * w)]); R.append([round(x - nx * w), round(y - ny * w)])
     return L + R[::-1]
 
+def _bil(g, xs, ys):
+    import numpy as np
+    H, W = g.shape; xs = np.clip(xs, 0, W - 1.001); ys = np.clip(ys, 0, H - 1.001); x0 = xs.astype(int); y0 = ys.astype(int); fx = xs - x0; fy = ys - y0
+    return (g[y0, x0] * (1 - fx) * (1 - fy) + g[y0, x0 + 1] * fx * (1 - fy) + g[y0 + 1, x0] * (1 - fx) * fy + g[y0 + 1, x0 + 1] * fx * fy)
+
+def _smooth(v, s):
+    import numpy as np
+    k = np.exp(-0.5 * (np.arange(-3 * s, 3 * s + 1) / s) ** 2); k /= k.sum(); p = np.pad(v, (len(k) // 2,), mode="edge"); return np.convolve(p, k, mode="valid")
+
+def _rdp(pts, eps):
+    import numpy as np
+    if len(pts) < 3: return pts
+    a, b = pts[0], pts[-1]; d = b - a; n = np.hypot(*d) or 1
+    dist = np.abs(d[0] * (pts[:, 1] - a[1]) - d[1] * (pts[:, 0] - a[0])) / n; i = int(dist.argmax())
+    if dist[i] > eps: return np.vstack([_rdp(pts[:i + 1], eps)[:-1], _rdp(pts[i:], eps)])
+    return np.array([a, b])
+
+def snap(img, pts, R=32, gap=5, thr=90, pad=3, minlines=3):
+    """v217 おおまかな真ん中の線 → 線の束(間隔 gap px 以内で並ぶ minlines 本以上の黒い線)の外側に沿う poly。
+       ユーザーの手塗りの見本(FXJP854 15日00Z の T12・T36)で調整: thr 90・gap 5・pad 3"""
+    import numpy as np
+    g = np.asarray(Image.open(img).convert("L")).astype(float)
+    P = []
+    for (x0, y0), (x1, y1) in zip(pts[:-1], pts[1:]):
+        n = max(1, int(math.hypot(x1 - x0, y1 - y0) / 3))
+        P += [(x0 + (x1 - x0) * k / n, y0 + (y1 - y0) * k / n) for k in range(n)]
+    P = np.array(P + [tuple(pts[-1])], float); P[:, 0] = _smooth(P[:, 0], 2); P[:, 1] = _smooth(P[:, 1], 2)
+    T = np.gradient(P, axis=0); T /= np.linalg.norm(T, axis=1, keepdims=True) + 1e-9; N = np.stack([-T[:, 1], T[:, 0]], 1)
+    ts = np.arange(-R, R + 0.01, 0.5); lo = np.full(len(P), np.nan); hi = np.full(len(P), np.nan)
+    for i, (p, n) in enumerate(zip(P, N)):
+        d = _bil(g, p[0] + ts * n[0], p[1] + ts * n[1]) < thr; rr = []; j = 0
+        while j < len(d):
+            if d[j]:
+                k = j
+                while k < len(d) and d[k]: k += 1
+                rr.append((ts[j], ts[k - 1])); j = k
+            else: j += 1
+        if not rr: continue
+        cl = [[rr[0]]]
+        for r in rr[1:]: cl[-1].append(r) if r[0] - cl[-1][-1][1] <= gap else cl.append([r])
+        b = max(cl, key=lambda c: len(c) - abs((c[0][0] + c[-1][1]) / 2) / 8)
+        if len(b) >= minlines: lo[i] = b[0][0] - pad; hi[i] = b[-1][1] + pad
+    ok = ~np.isnan(lo); idx = np.arange(len(P))
+    if ok.sum() < 2: sys.exit("束が見つからない: 点が線の束から離れすぎていないか確かめる")
+    lo = np.interp(idx, idx[ok], lo[ok]); hi = np.interp(idx, idx[ok], hi[ok])
+    med = lambda v: np.array([np.median(v[max(0, i - 4):i + 5]) for i in range(len(v))])
+    lo = _smooth(med(lo), 4); hi = _smooth(med(hi), 4)
+    poly = np.vstack([_rdp(P + N * lo[:, None], 1.2), _rdp((P + N * hi[:, None])[::-1], 1.2)])
+    out = [[int(round(x)), int(round(y))] for x, y in poly]
+    print(f"束を見つけた点の割合 {ok.mean():.0%}(低いときは点を束の真ん中へ寄せる)", file=sys.stderr)
+    return out
+
+def snap_preview(img, poly, out):
+    im = Image.open(img).convert("RGBA"); r = draw_marks(im, [{"n": "", "kind": "front", "shape": "poly", "pts": poly}], font(18))
+    xs = [p[0] for p in poly]; ys = [p[1] for p in poly]; x0, y0 = max(0, min(xs) - 40), max(0, min(ys) - 40); x1, y1 = min(im.width, max(xs) + 40), min(im.height, max(ys) + 40)
+    c = r.crop((x0, y0, x1, y1)); ov = Image.new("RGBA", c.size, (0, 0, 0, 0)); ticks(ImageDraw.Draw(ov), x0, y0, c.width, c.height, 50, 100, font(13))
+    c = Image.alpha_composite(c, ov); z = min(3.0, 1400 / max(c.size)); c.resize((int(c.width * z), int(c.height * z)), Image.LANCZOS).convert("RGB").save(out)
+    print(f"{out}: 確認画像({z:.1f} 倍)", file=sys.stderr)
+
 def bbox(m):
     if m.get("shape") == "ellipse":
         r = max(m["rx"], m["ry"]); return m["cx"] - r, m["cy"] - r, m["cx"] + r, m["cy"] + r
@@ -98,9 +163,14 @@ if __name__ == "__main__":
     g.add_argument("w", type=int, nargs="?", default=700); g.add_argument("h", type=int, nargs="?", default=700); g.add_argument("-o", default="")
     o = sp.add_parser("overview"); o.add_argument("img"); o.add_argument("-o", default="")
     c = sp.add_parser("check"); c.add_argument("img"); c.add_argument("marks"); c.add_argument("-o", default="")
+    sn = sp.add_parser("snap"); sn.add_argument("img"); sn.add_argument("pts", nargs="+"); sn.add_argument("-o", default="")
     b = sp.add_parser("band"); b.add_argument("w", type=float); b.add_argument("pts", nargs="+")
     a = ap.parse_args()
     if a.cmd == "band": print(json.dumps(band(a.w, [tuple(float(v) for v in p.split(",")) for p in a.pts]))); sys.exit()
+    if a.cmd == "snap":
+        poly = snap(a.img, [tuple(float(v) for v in p.split(",")) for p in a.pts]); print(json.dumps(poly))
+        if a.o: snap_preview(a.img, poly, a.o)
+        sys.exit()
     base = os.path.splitext(a.img)[0]
     if a.cmd == "grid": grid(a.img, a.x0, a.y0, a.w, a.h, a.o or f"{base}_g{a.x0}_{a.y0}.png")
     elif a.cmd == "overview": overview(a.img, a.o or f"{base}_ov.png")
