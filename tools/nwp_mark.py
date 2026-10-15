@@ -19,7 +19,9 @@
 #       v218 閉じた等値線の内側(低気圧・寒冷渦のいちばん内側の線、-24℃ などの等温線で囲まれた寒気、80kt・100kt などの等風速線で囲まれた強風域、
 #       断面図のシアーの破線で囲まれた所 など)を、x,y(その内側の点)から塗りつぶして、線にぴったり沿う poly を出す。
 #       破線・数字で線が切れている所は --gap(px)で閉じる(破線なら 4〜6)。--minw は壁にする線のかけらの最小の長さ(既定 9 = 破線も壁。
-#       実線だけで囲む = 内側の破線の等温線を無視したいときは --minw 40)。線が開いていて外へ漏れると --max(px、点からの距離)で止まり「漏れた」と出る → gap を上げるか点を変える。
+#       実線だけで囲む = 内側の破線の等温線を無視したいときは --minw 40)。
+#       --dashed = 太い破線だけを壁にする(等風速線・等温線・断面図のシアーの破線が実線と交差していて普通の fill が止まるとき。--gap 6 くらい)。
+#       --box x0,y0,x1,y1 = その四角の外へは広げない(囲みが開いている所を、図の枠・FL などで区切るとき)。線が開いていて外へ漏れると --max(px、点からの距離)で止まり「漏れた」と出る → gap を上げるか点を変える。
 #   python3 tools/nwp_mark.py dots <図.png> x,y [--r 11] [-o 確認.png]
 #       v218 点々(AUPQ78 の湿域 = 湿数 3℃ 未満)の広がりの縁に沿う poly。x,y はその点々の中の点。
 #   python3 tools/nwp_mark.py snap <図.png> x1,y1 x2,y2 … [-o 確認.png]
@@ -146,7 +148,7 @@ def _poly_from_mask(m, eps=1.5):
     c = max(cs, key=cv2.contourArea); a = cv2.approxPolyDP(c, eps, True).reshape(-1, 2)
     return [[int(x), int(y)] for x, y in a]
 
-def fill(img, seed, gap=3, mx=250, thr=150, minw=9):
+def fill(img, seed, gap=3, mx=250, thr=150, minw=9, dashed=False, box=None):
     """v218 閉じた線の内側を塗りつぶす(線は gap px 太らせて切れ目を閉じ、最後に戻す)"""
     import numpy as np, cv2
     from scipy import ndimage as nd
@@ -154,6 +156,12 @@ def fill(img, seed, gap=3, mx=250, thr=150, minw=9):
     lab, n = nd.label(dark, np.ones((3, 3))); sl = nd.find_objects(lab); big = np.zeros(n + 1, bool)
     for i, s_ in enumerate(sl, 1): big[i] = max(s_[0].stop - s_[0].start, s_[1].stop - s_[1].start) >= minw
     dark = big[lab]   # 文字・数字・点々など小さい物は壁にしない(線の破線の 1 本は残る大きさ minw px 以上)
+    if dashed:   # v218 太い破線(等風速線・等温線・シアー)だけを壁にする: 細い線を落とし、長くつながった実線も壁にしない
+        th = nd.binary_opening(g < thr, np.ones((2, 2), bool)); lab, n = nd.label(th, np.ones((3, 3))); keep = np.zeros(n + 1, bool)
+        for i, s_ in enumerate(nd.find_objects(lab), 1): keep[i] = 6 <= max(s_[0].stop - s_[0].start, s_[1].stop - s_[1].start) <= 45
+        dark = keep[lab]
+    if box:   # 枠の外は壁(囲みが開いている所を区切る)
+        bx0, by0, bx1, by1 = box; B = np.ones(g.shape, bool); B[by0:by1, bx0:bx1] = False; dark |= B
     k = np.ones((2 * gap + 1, 2 * gap + 1), bool); wall = nd.binary_dilation(dark, k)
     sx, sy = int(seed[0]), int(seed[1])
     if wall[sy, sx]:   # 点が線の上 → 近くの白い所へ寄せる
@@ -229,7 +237,7 @@ if __name__ == "__main__":
     g.add_argument("w", type=int, nargs="?", default=700); g.add_argument("h", type=int, nargs="?", default=700); g.add_argument("-o", default="")
     o = sp.add_parser("overview"); o.add_argument("img"); o.add_argument("-o", default="")
     c = sp.add_parser("check"); c.add_argument("img"); c.add_argument("marks"); c.add_argument("-o", default="")
-    fl = sp.add_parser("fill"); fl.add_argument("img"); fl.add_argument("pt"); fl.add_argument("--gap", type=int, default=3); fl.add_argument("--max", type=int, default=250); fl.add_argument("--minw", type=int, default=9); fl.add_argument("-o", default="")
+    fl = sp.add_parser("fill"); fl.add_argument("img"); fl.add_argument("pt"); fl.add_argument("--gap", type=int, default=3); fl.add_argument("--max", type=int, default=250); fl.add_argument("--minw", type=int, default=9); fl.add_argument("--dashed", action="store_true"); fl.add_argument("--box", default=""); fl.add_argument("-o", default="")
     dt = sp.add_parser("dots"); dt.add_argument("img"); dt.add_argument("pt"); dt.add_argument("--r", type=int, default=11); dt.add_argument("-o", default="")
     sn = sp.add_parser("snap"); sn.add_argument("img"); sn.add_argument("pts", nargs="+"); sn.add_argument("-o", default="")
     b = sp.add_parser("band"); b.add_argument("w", type=float); b.add_argument("pts", nargs="+")
@@ -237,7 +245,7 @@ if __name__ == "__main__":
     if a.cmd == "band": print(json.dumps(band(a.w, [tuple(float(v) for v in p.split(",")) for p in a.pts]))); sys.exit()
     if a.cmd in ("fill", "dots"):
         pt = [float(v) for v in a.pt.split(",")]
-        poly = fill(a.img, pt, a.gap, a.max, minw=a.minw) if a.cmd == "fill" else dots(a.img, pt, a.r); print(json.dumps(poly))
+        poly = fill(a.img, pt, a.gap, a.max, minw=a.minw, dashed=a.dashed, box=[int(v) for v in a.box.split(",")] if a.box else None) if a.cmd == "fill" else dots(a.img, pt, a.r); print(json.dumps(poly))
         if a.o: snap_preview(a.img, poly, a.o)
         sys.exit()
     if a.cmd == "snap":
