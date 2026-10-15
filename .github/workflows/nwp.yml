@@ -15,6 +15,10 @@ on:
         description: "同じ回でも AI の解説を作り直す"
         type: boolean
         default: false
+  # v209 Claude の定時の解析が nwp_ai/ai.json を push したら、毎時 22 分を待たずにすぐ KV に取り込む(印が図に付くまでの遅れを減らす)
+  push:
+    branches: [main]
+    paths: [nwp_ai/ai.json]
 
 permissions:
   contents: write   # v195 ブランチ nwp-img に図を置くため
