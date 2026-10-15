@@ -115,7 +115,7 @@ def obs_hima(kv):
 #   jet = FL300〜450 の最大風速(kt)と その FL、vws = FL250〜450 の上下の層の風の差(kt/1000ft)、ti1 = Ellrod TI1(×1e-7/s²、FL250〜450)。vws・ti1 は升の中の 90 パーセンタイルの、一番大きい層の値、
 #   trop = 圏界面の FL(升の平均)、fz = 0℃ の高さ(FL、升の平均)、ice = 湿度 85% 以上・気温 0〜−15℃ の層の FL [下, 上]
 #   T+0 は観測を取り込んだ直後の値なので、ジェット・シアー・圏界面の「実際に近い姿」として事後検証に使う(観測そのものではない)。T+12 は気象庁の予想と比べる 2 つ目のモデル
-UK_V = 4   # v209 絶対渦度(慣性不安定)を足した。v208 風向・風向の変わり方・Ri を足した。 v208 風向・風向の変わり方・Ri を足した。 まとめ方を変えたら上げる(同じ回でも作り直す)
+UK_V = 5   # v210 TI1 の分布(ti1_dist。Map のしきい値を決めるため)を足した。 v209 絶対渦度(慣性不安定)を足した。v208 風向・風向の変わり方・Ri を足した。 v208 風向・風向の変わり方・Ri を足した。 まとめ方を変えたら上げる(同じ回でも作り直す)
 def p2fl(p): return (1 - (np.asarray(p, float) / 1013.25) ** 0.190263) * 145442.16 / 100
 def obs_ukmo(kv, d):
     import warnings; warnings.simplefilter("ignore", RuntimeWarning)   # 全部が欠けの升の nanmax
@@ -141,6 +141,15 @@ def obs_ukmo(kv, d):
         tp = a[n3:n3 + ny * nx].reshape(ny, nx).astype(float); tp[tp == -32768] = np.nan; tpfl = p2fl(tp / 10)
         TI = np.frombuffer(ixb, "<i2").reshape(L, 1, ny, nx)[:, 0].astype(float) / 10 if ixb else None
         RH = np.frombuffer(rhb, "u1").reshape(L, ny, nx).astype(float) if rhb else None
+        # v210 ユーザー「TI1 だとかなり広範囲が塗られる」→ Map の塗りのしきい値を決めるため、日本付近(24〜46N・122〜148E)の FL300〜410 の層の TI1 の格子点の分布
+        if TI is not None:
+            jl = (lat >= 24) & (lat <= 46); jo = (lon >= 122) & (lon <= 148); lvs = (FL >= 290) & (FL <= 420)
+            tv = TI[lvs][:, jl][:, :, jo].ravel(); tv = tv[np.isfinite(tv)]
+            if tv.size:
+                dist = {"n": int(tv.size), "pct": {str(q): round(float(np.percentile(tv, q)), 1) for q in (50, 75, 90, 95, 98, 99, 99.5)},
+                        "ge": {str(t): round(float((tv >= t).mean() * 100), 2) for t in (4, 6, 8, 12, 16, 20, 30, 40)}}
+                out.setdefault("ti1_dist", {})["t0" if s.get("lead") == 0 else "f12"] = dist
+                log(f"ukmo TI1 分布 lead {s.get('lead')}: {dist}")
         up = (FL >= 300) & (FL <= 450); mid = (FL >= 250) & (FL <= 450)
         Sj = np.where(up[:, None, None], S, np.nan)
         dV = np.hypot(np.diff(U, axis=0), np.diff(V, axis=0)) / (np.diff(FL)[:, None, None] / 10)   # kt / 1000ft
