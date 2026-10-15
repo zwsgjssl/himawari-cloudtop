@@ -87,7 +87,9 @@ def check(img, mfile, head):
         x0, y0, x1, y1 = bbox(m); x0, y0 = int(max(0, x0 - 60)), int(max(0, y0 - 60)); x1, y1 = int(min(W, x1 + 60)), int(min(H, y1 + 60))
         c = r.crop((x0, y0, x1, y1)); ov = Image.new("RGBA", c.size, (0, 0, 0, 0)); ticks(ImageDraw.Draw(ov), x0, y0, c.width, c.height, 50, 100, font(13))
         c = Image.alpha_composite(c, ov)
-        if max(c.size) > 900: c = c.resize((int(c.width * 900 / max(c.size)), int(c.height * 900 / max(c.size))), Image.LANCZOS)
+        z = 900 / max(c.size)   # v212 小さい印は 2〜3 倍に拡大(曲がり角で束がはみ出していないか見えるように)。大きい印は 900px に縮める
+        z = min(3.0, z) if z > 1 else z
+        if abs(z - 1) > 0.05: c = c.resize((int(c.width * z), int(c.height * z)), Image.LANCZOS)
         f = f"{head}_{m.get('n', 0)}.png"; c.convert("RGB").save(f); print(f"{f}: 印 {m.get('n')}({m.get('label', '')})x {x0}〜{x1}, y {y0}〜{y1}")
 
 if __name__ == "__main__":
