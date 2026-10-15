@@ -405,7 +405,8 @@ def main():
     ai = head.get("ai")
     bases = {c["base"] for c in charts if c.get("grp", "upper") == "upper"}   # v201 地上天気図は別の時刻でよい
     fa = ai_from_file(next(iter(bases))) if charts and len(bases) == 1 else None
-    if fa and (not ai or any(ai.get(k) != fa.get(k) for k in ("base", "at", "summary", "check", "lm"))):
+    # v211 解説・印だけを手で直したとき(at が同じ)も取り込む: 中身のどこかが違えば取り込む(前は base・at・summary・check・lm だけを比べていて、charts・marks の直しが KV に入らなかった)
+    if fa and (not ai or any(ai.get(k) != fa.get(k) for k in ("base", "at", "summary", "check", "lm", "charts", "marks", "refs", "model"))):
         ai = fa; changed = True; log(f"解説を取り込みました({AI_FILE}、{fa['base']}、{fa['model']})")
     elif fa: pass
     elif charts and len(bases) == 1 and os.environ.get("ANTHROPIC_API_KEY") and (a.force_ai or not ai or ai.get("base") != next(iter(bases))):
