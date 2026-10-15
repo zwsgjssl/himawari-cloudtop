@@ -7,6 +7,8 @@
 #     rad   … レーダー(気象庁 hrpns、H の直前の 1 枚、z6)の升ごとの一番強い段階(1 = 1mm/h 未満 … 5 = 20〜30、6 = 30〜50、7 = 50〜80、8 = 80 以上)と、段階 5 以上の画素の数(rad20)
 #     irmin … ひまわり B13 の一番低い温度(K、KV hima:latest の赤外。CB の目安: 215K 以下)、ctop … 雲頂 FL の一番高い所(同じく雲頂)
 #     metar … 主な空港の METAR(aviationweather.gov)、sigmet … 福岡 FIR(RJJJ)の SIGMET(aviationweather.gov の国際 SIGMET)、pirep … 日本付近の PIREP・AIREP(乱気流・着氷)
+#     taf   … 主な空港の TAF(aviationweather.gov)。v219 ユーザー「WX 解析の答え合わせに TAF って有用じゃない?」。
+#             新しく出た TAF だけ(同じ空港・同じ発表時刻をその日と前の日の記録で見たら入れない)。{id, issue, from, to, raw}
 #   どれかが取れなくても、取れた物だけで記録する(ログに理由)。同じ時刻をもう記録していれば、足りない物だけ取り直す
 import argparse, datetime as dt, email.utils, gzip, io, json, math, os, sys, time
 import numpy as np, requests
@@ -227,6 +229,19 @@ def obs_metar():
             "wdir": m.get("wdir"), "wspd": m.get("wspd"), "wgst": m.get("wgst"), "wx": m.get("wxString")} for m in j if isinstance(m, dict)]
     log(f"METAR: {len(out)} 通"); return out
 
+def obs_taf(seen):
+    """v219 TAF。seen = もう記録した (空港, 発表時刻) の集まり"""
+    j = awc("taf", ids=AIRPORTS, format="json")
+    out = []
+    for m in j if isinstance(j, list) else []:
+        if not isinstance(m, dict): continue
+        iid, iss, raw = m.get("icaoId"), m.get("issueTime") or m.get("bulletinTime"), m.get("rawTAF") or m.get("rawOb")
+        if not iid or not raw or (iid, str(iss)) in seen: continue
+        cv = lambda v: dt.datetime.fromtimestamp(v, dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ") if isinstance(v, (int, float)) else v
+        out.append({"id": iid, "issue": str(iss), "from": cv(m.get("validTimeFrom")), "to": cv(m.get("validTimeTo")), "raw": raw})
+    log(f"TAF: 新しい物 {len(out)} 通(全体 {len(j) if isinstance(j, list) else '?'} 通"
+        + (f"、項目 {sorted(j[0].keys())}" if isinstance(j, list) and j and isinstance(j[0], dict) else "") + ")"); return out
+
 def obs_sigmet():
     j = awc("isigmet", format="json")
     out = []
@@ -269,7 +284,13 @@ def main():
     f = os.path.join(od, H.strftime("%Y%m%d") + ".json")
     day = json.load(open(f, encoding="utf-8")) if os.path.exists(f) else {"hours": {}}
     rec = day["hours"].get(H.strftime("%HZ"), {})
-    jobs = [("ltg", lambda: obs_ltg(H)), ("rad", lambda: obs_rad(H)), ("metar", obs_metar), ("sigmet", obs_sigmet), ("pirep", obs_pirep)]
+    seen = set()   # v219 もう記録した TAF(その日と前の日)
+    pf = os.path.join(od, (H - dt.timedelta(days=1)).strftime("%Y%m%d") + ".json")
+    for dd in [day] + ([json.load(open(pf, encoding="utf-8"))] if os.path.exists(pf) else []):
+        for hh, r_ in dd.get("hours", {}).items():
+            if hh == H.strftime("%HZ") and dd is day: continue
+            for t_ in r_.get("taf") or []: seen.add((t_.get("id"), str(t_.get("issue"))))
+    jobs = [("ltg", lambda: obs_ltg(H)), ("rad", lambda: obs_rad(H)), ("metar", obs_metar), ("sigmet", obs_sigmet), ("pirep", obs_pirep), ("taf", lambda: obs_taf(seen))]
     for name, fn in jobs:
         if rec.get(name): continue   # 取れている物は取り直さない(空の SIGMET・PIREP は取り直す)
         try:
