@@ -15,6 +15,13 @@
 #   python3 tools/nwp_mark.py band <半幅px> x1,y1 x2,y2 …
 #       曲がった帯(相当温位の集中帯・シアーの帯など)の真ん中の線の点と半幅から、帯を囲む poly の pts(JSON)を出す。
 #       線の束の真ん中を 10〜20 点でなぞり、半幅は束の太さの半分(多くは 10〜20px)。折れ曲がり・北東への続きも点を足してなぞる。
+#   python3 tools/nwp_mark.py fill <図.png> x,y [--gap 3] [--max 250] [-o 確認.png]
+#       v218 閉じた等値線の内側(低気圧・寒冷渦のいちばん内側の線、-24℃ などの等温線で囲まれた寒気、80kt・100kt などの等風速線で囲まれた強風域、
+#       断面図のシアーの破線で囲まれた所 など)を、x,y(その内側の点)から塗りつぶして、線にぴったり沿う poly を出す。
+#       破線・数字で線が切れている所は --gap(px)で閉じる(破線なら 4〜6)。--minw は壁にする線のかけらの最小の長さ(既定 9 = 破線も壁。
+#       実線だけで囲む = 内側の破線の等温線を無視したいときは --minw 40)。線が開いていて外へ漏れると --max(px、点からの距離)で止まり「漏れた」と出る → gap を上げるか点を変える。
+#   python3 tools/nwp_mark.py dots <図.png> x,y [--r 11] [-o 確認.png]
+#       v218 点々(AUPQ78 の湿域 = 湿数 3℃ 未満)の広がりの縁に沿う poly。x,y はその点々の中の点。
 #   python3 tools/nwp_mark.py snap <図.png> x1,y1 x2,y2 … [-o 確認.png]
 #       v217 ユーザーが FXJP854 に手で塗った見本(線の束そのものだけを細くなぞる)に合わせる道具。集中帯・シアーの帯は band ではなくこれを使う。
 #       束の真ん中あたりを 20〜40px おきの点でおおまかになぞる(±25px ずれていてよい)と、各点で直角方向に図の黒い線を数え、
@@ -22,6 +29,7 @@
 #       S 字・折り返しは、曲がりに沿って点を細かく(10〜20px おき)置く。隣の枝に飛ばないよう、折り返しの内側を通らない。
 #       -o を付けると、図に重ねた 3 倍の確認画像を出す。必ず Read で見て、束からはみ出し・束の取りこぼしが無いか確かめる。
 import argparse, json, math, os, sys
+# fill・dots は numpy・scipy・opencv を使う。無ければ pip install --break-system-packages numpy scipy opencv-python-headless
 from PIL import Image, ImageDraw, ImageFont
 
 COL = {"front": (220, 60, 60), "jet": (230, 150, 0), "cat": (200, 0, 120), "trough": (120, 70, 20), "cold": (40, 110, 230),
@@ -131,6 +139,64 @@ def snap(img, pts, R=32, gap=5, thr=90, pad=3, minlines=3):
     print(f"束を見つけた点の割合 {ok.mean():.0%}(低いときは点を束の真ん中へ寄せる)", file=sys.stderr)
     return out
 
+def _poly_from_mask(m, eps=1.5):
+    import numpy as np, cv2
+    cs, _ = cv2.findContours(m.astype("uint8"), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    if not cs: sys.exit("塗る所が見つからない")
+    c = max(cs, key=cv2.contourArea); a = cv2.approxPolyDP(c, eps, True).reshape(-1, 2)
+    return [[int(x), int(y)] for x, y in a]
+
+def fill(img, seed, gap=3, mx=250, thr=150, minw=9):
+    """v218 閉じた線の内側を塗りつぶす(線は gap px 太らせて切れ目を閉じ、最後に戻す)"""
+    import numpy as np, cv2
+    from scipy import ndimage as nd
+    g = np.asarray(Image.open(img).convert("L")); dark = g < thr
+    lab, n = nd.label(dark, np.ones((3, 3))); sl = nd.find_objects(lab); big = np.zeros(n + 1, bool)
+    for i, s_ in enumerate(sl, 1): big[i] = max(s_[0].stop - s_[0].start, s_[1].stop - s_[1].start) >= minw
+    dark = big[lab]   # 文字・数字・点々など小さい物は壁にしない(線の破線の 1 本は残る大きさ minw px 以上)
+    k = np.ones((2 * gap + 1, 2 * gap + 1), bool); wall = nd.binary_dilation(dark, k)
+    sx, sy = int(seed[0]), int(seed[1])
+    if wall[sy, sx]:   # 点が線の上 → 近くの白い所へ寄せる
+        ys, xs = np.nonzero(~wall[max(0, sy - 15):sy + 16, max(0, sx - 15):sx + 16])
+        if not len(xs): sys.exit("点のまわりが線だらけ: 内側の白い所に点を置く")
+        i = np.argmin((xs - min(15, sx)) ** 2 + (ys - min(15, sy)) ** 2); sx, sy = sx - min(15, sx) + xs[i], sy - min(15, sy) + ys[i]
+    lab, _ = nd.label(~wall); reg = lab == lab[sy, sx]
+    yy, xx = np.nonzero(reg); far = np.hypot(xx - sx, yy - sy).max()
+    if far > mx:
+        print(f"漏れた(点から {far:.0f}px まで広がった): 線が開いている。--gap を上げるか、点・--max を見直す。ここでは {mx}px で切った", file=sys.stderr)
+        Y, X = np.ogrid[:g.shape[0], :g.shape[1]]; reg &= (X - sx) ** 2 + (Y - sy) ** 2 <= mx * mx
+    reg = nd.binary_fill_holes(nd.binary_dilation(reg, k))   # 太らせた分を戻す(線の真ん中まで)
+    print(f"塗った広さ {reg.sum()} 画素", file=sys.stderr)
+    return _poly_from_mask(reg)
+
+def dots(img, seed, r=11, thr=110):
+    """v218 点々(小さな黒い点の集まり)の広がり"""
+    import numpy as np
+    from scipy import ndimage as nd
+    g = np.asarray(Image.open(img).convert("L")); lab, n = nd.label(g < thr, np.ones((3, 3)))
+    sz = nd.sum(np.ones_like(lab), lab, range(1, n + 1)); sl = nd.find_objects(lab)
+    ok = np.zeros(n + 1, bool)
+    for i, (s_, z) in enumerate(zip(sl, sz), 1):   # 点々の 1 粒 = 1〜4 画素・3×3 以内(JMA の図は 2×1 の粒が 9px おき)
+        ok[i] = z <= 4 and s_[0].stop - s_[0].start <= 3 and s_[1].stop - s_[1].start <= 3
+    dm = ok[lab]
+    near = nd.binary_dilation(dm, np.ones((5, 5), bool))   # 粒のまわり 2px に、ほかの黒い物(線のかけら)が無いこと
+    other = (g < 215) & ~nd.binary_dilation(dm, np.ones((3, 3), bool))   # 薄い経緯線のかけらも「ほかの物」に数える
+    bad = nd.binary_dilation(other, np.ones((5, 5), bool)) & dm
+    badlab = np.unique(lab[bad]); ok[badlab] = False; dm = ok[lab]
+    nb = nd.uniform_filter(dm.astype(float), 25) * 625   # 近くに粒が 4 つ以上ある粒だけ(ばらばらの小さな汚れを除く)
+    dm &= nb >= 5
+    Y, X = np.ogrid[-r:r + 1, -r:r + 1]; disk = X * X + Y * Y <= r * r
+    m = nd.binary_dilation(dm, disk)   # 粒を r 太らせてつなぐ(線をまたいで 2 粒抜けても切れない)→ 縁を粒の外 4px まで戻す
+    e = max(1, r - 4); Y2, X2 = np.ogrid[-e:e + 1, -e:e + 1]; m = nd.binary_erosion(m, X2 * X2 + Y2 * Y2 <= e * e)
+    Y3, X3 = np.ogrid[-6:7, -6:7]; m = nd.binary_opening(m, X3 * X3 + Y3 * Y3 <= 36)   # 経緯線に沿った細いひげを落とす
+    lab2, _ = nd.label(m); sx, sy = int(seed[0]), int(seed[1]); L = lab2[sy, sx]
+    if not L:
+        ys, xs = np.nonzero(lab2[max(0, sy - 30):sy + 31, max(0, sx - 30):sx + 31])
+        if not len(xs): sys.exit("点のまわり 30px に点々が無い")
+        i = np.argmin((xs - min(30, sx)) ** 2 + (ys - min(30, sy)) ** 2); L = lab2[sy - min(30, sy) + ys[i], sx - min(30, sx) + xs[i]]
+    reg = nd.binary_fill_holes(lab2 == L); print(f"塗った広さ {reg.sum()} 画素", file=sys.stderr)
+    return _poly_from_mask(reg)
+
 def snap_preview(img, poly, out):
     im = Image.open(img).convert("RGBA"); r = draw_marks(im, [{"n": "", "kind": "front", "shape": "poly", "pts": poly}], font(18))
     xs = [p[0] for p in poly]; ys = [p[1] for p in poly]; x0, y0 = max(0, min(xs) - 40), max(0, min(ys) - 40); x1, y1 = min(im.width, max(xs) + 40), min(im.height, max(ys) + 40)
@@ -163,10 +229,17 @@ if __name__ == "__main__":
     g.add_argument("w", type=int, nargs="?", default=700); g.add_argument("h", type=int, nargs="?", default=700); g.add_argument("-o", default="")
     o = sp.add_parser("overview"); o.add_argument("img"); o.add_argument("-o", default="")
     c = sp.add_parser("check"); c.add_argument("img"); c.add_argument("marks"); c.add_argument("-o", default="")
+    fl = sp.add_parser("fill"); fl.add_argument("img"); fl.add_argument("pt"); fl.add_argument("--gap", type=int, default=3); fl.add_argument("--max", type=int, default=250); fl.add_argument("--minw", type=int, default=9); fl.add_argument("-o", default="")
+    dt = sp.add_parser("dots"); dt.add_argument("img"); dt.add_argument("pt"); dt.add_argument("--r", type=int, default=11); dt.add_argument("-o", default="")
     sn = sp.add_parser("snap"); sn.add_argument("img"); sn.add_argument("pts", nargs="+"); sn.add_argument("-o", default="")
     b = sp.add_parser("band"); b.add_argument("w", type=float); b.add_argument("pts", nargs="+")
     a = ap.parse_args()
     if a.cmd == "band": print(json.dumps(band(a.w, [tuple(float(v) for v in p.split(",")) for p in a.pts]))); sys.exit()
+    if a.cmd in ("fill", "dots"):
+        pt = [float(v) for v in a.pt.split(",")]
+        poly = fill(a.img, pt, a.gap, a.max, minw=a.minw) if a.cmd == "fill" else dots(a.img, pt, a.r); print(json.dumps(poly))
+        if a.o: snap_preview(a.img, poly, a.o)
+        sys.exit()
     if a.cmd == "snap":
         poly = snap(a.img, [tuple(float(v) for v in p.split(",")) for p in a.pts]); print(json.dumps(poly))
         if a.o: snap_preview(a.img, poly, a.o)
