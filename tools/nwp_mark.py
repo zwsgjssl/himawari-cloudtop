@@ -12,6 +12,9 @@
 #   python3 tools/nwp_mark.py check <図.png> <marks.json> [-o 出力の頭]
 #       印を Map と同じように(半透明の色・縁取り・番号)描く。全体(縮小)と、印ごとに 元の画素のままの拡大(余白 60px・目盛りつき)を出す。
 #       → 1 つずつ Read で見て、印が線・帯・記号の本当の位置に重なっているか確かめる。
+#   python3 tools/nwp_mark.py band <半幅px> x1,y1 x2,y2 …
+#       曲がった帯(相当温位の集中帯・シアーの帯など)の真ん中の線の点と半幅から、帯を囲む poly の pts(JSON)を出す。
+#       線の束の真ん中を 10〜20 点でなぞり、半幅は束の太さの半分(多くは 10〜20px)。折れ曲がり・北東への続きも点を足してなぞる。
 import argparse, json, math, os, sys
 from PIL import Image, ImageDraw, ImageFont
 
@@ -63,6 +66,13 @@ def draw_marks(im, marks, F):
         d.text((lx - 6, ly - 9), str(m.get("n", "")), fill=edge, font=F)
     return Image.alpha_composite(im, ov)
 
+def band(w, pts):
+    L, R = [], []
+    for i, (x, y) in enumerate(pts):
+        a, b = pts[max(0, i - 1)], pts[min(len(pts) - 1, i + 1)]; dx, dy = b[0] - a[0], b[1] - a[1]; n = math.hypot(dx, dy) or 1
+        nx, ny = -dy / n, dx / n; L.append([round(x + nx * w), round(y + ny * w)]); R.append([round(x - nx * w), round(y - ny * w)])
+    return L + R[::-1]
+
 def bbox(m):
     if m.get("shape") == "ellipse":
         r = max(m["rx"], m["ry"]); return m["cx"] - r, m["cy"] - r, m["cx"] + r, m["cy"] + r
@@ -86,7 +96,10 @@ if __name__ == "__main__":
     g.add_argument("w", type=int, nargs="?", default=700); g.add_argument("h", type=int, nargs="?", default=700); g.add_argument("-o", default="")
     o = sp.add_parser("overview"); o.add_argument("img"); o.add_argument("-o", default="")
     c = sp.add_parser("check"); c.add_argument("img"); c.add_argument("marks"); c.add_argument("-o", default="")
-    a = ap.parse_args(); base = os.path.splitext(a.img)[0]
+    b = sp.add_parser("band"); b.add_argument("w", type=float); b.add_argument("pts", nargs="+")
+    a = ap.parse_args()
+    if a.cmd == "band": print(json.dumps(band(a.w, [tuple(float(v) for v in p.split(",")) for p in a.pts]))); sys.exit()
+    base = os.path.splitext(a.img)[0]
     if a.cmd == "grid": grid(a.img, a.x0, a.y0, a.w, a.h, a.o or f"{base}_g{a.x0}_{a.y0}.png")
     elif a.cmd == "overview": overview(a.img, a.o or f"{base}_ov.png")
     else: check(a.img, a.marks, a.o or f"{base}_chk")
