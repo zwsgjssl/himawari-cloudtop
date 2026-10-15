@@ -24,6 +24,10 @@
 #       --box x0,y0,x1,y1 = その四角の外へは広げない(囲みが開いている所を、図の枠・FL などで区切るとき)。線が開いていて外へ漏れると --max(px、点からの距離)で止まり「漏れた」と出る → gap を上げるか点を変える。
 #   python3 tools/nwp_mark.py dots <図.png> x,y [--r 11] [-o 確認.png]
 #       v218 点々(AUPQ78 の湿域 = 湿数 3℃ 未満)の広がりの縁に沿う poly。x,y はその点々の中の点。
+#   python3 tools/nwp_mark.py bundles <図.png> [-o 候補.png]
+#       v222 ユーザー「(FXJP854 の色塗り)ズレすぎじゃない?」→ 相当温位の集中帯など「線の束」を図から自動で見つけて、候補ごとに色と記号(A・B・C…)を付けた絵を出す。
+#       座標を目で読む前に、まずこれを Read で見て、塗りたい束がどの色の候補か・その候補がどこを通るかを確かめる。snap の点はその色の帯の真ん中に置く。
+#       候補の座標(各候補の通る所を 20px おきに並べた点)も出る → snap の点の目安に使う(S 字・折り返しでは順番を図で確かめて並べ直す)。
 #   python3 tools/nwp_mark.py snap <図.png> x1,y1 x2,y2 … [-o 確認.png]
 #       v217 ユーザーが FXJP854 に手で塗った見本(線の束そのものだけを細くなぞる)に合わせる道具。集中帯・シアーの帯は band ではなくこれを使う。
 #       束の真ん中あたりを 20〜40px おきの点でおおまかになぞる(±25px ずれていてよい)と、各点で直角方向に図の黒い線を数え、
@@ -205,6 +209,39 @@ def dots(img, seed, r=11, thr=110):
     reg = nd.binary_fill_holes(lab2 == L); print(f"塗った広さ {reg.sum()} 画素", file=sys.stderr)
     return _poly_from_mask(reg)
 
+def bundles(img, out, step=2, R=14, thr=90, minlines=5, minarea=1500):
+    """v222 線の束(間隔 5px 以内で 5 本以上並ぶ黒い線)の候補を見つけ、色と記号を付けて描く"""
+    import numpy as np, colorsys, string
+    from scipy import ndimage as nd
+    g = np.asarray(Image.open(img).convert("L")).astype(float); H, W = g.shape
+    d = (g < thr).astype(float); gy, gx = np.gradient(nd.gaussian_filter(d, 1.0))
+    Jxx, Jyy, Jxy = nd.gaussian_filter(gx * gx, 4), nd.gaussian_filter(gy * gy, 4), nd.gaussian_filter(gx * gy, 4)
+    nrm = 0.5 * np.arctan2(2 * Jxy, Jxx - Jyy)   # 線に直角な向き
+    ys, xs = np.arange(0, H, step), np.arange(0, W, step); YY, XX = np.meshgrid(ys, xs, indexing="ij"); a = nrm[YY, XX]
+    ts = np.arange(-R, R + 0.01, 1.0); PX = XX[..., None] + np.cos(a)[..., None] * ts; PY = YY[..., None] + np.sin(a)[..., None] * ts
+    pr = nd.map_coordinates(g, [PY.ravel(), PX.ravel()], order=1, mode="nearest").reshape(PX.shape) < thr
+    nr = (pr[..., 1:] & ~pr[..., :-1]).sum(-1) + pr[..., 0]
+    sm = nd.gaussian_filter((nr >= minlines).astype(float), 1.0) > 0.35
+    m = np.kron(sm, np.ones((step, step), bool))[:H, :W]
+    m = nd.binary_closing(m, np.ones((5, 5), bool), iterations=2)
+    m = nd.binary_fill_holes(nd.binary_closing(m & nd.binary_dilation(g < thr, np.ones((5, 5), bool)), np.ones((5, 5), bool)))
+    lab, n = nd.label(m); sizes = nd.sum(m, lab, range(1, n + 1)); keep = [i + 1 for i, v in enumerate(sizes) if v >= minarea]
+    im = np.asarray(Image.open(img).convert("RGB")).astype(float); F = font(max(18, W // 50)); info = []
+    names = list(string.ascii_uppercase) + [a_ + b_ for a_ in string.ascii_uppercase for b_ in string.ascii_uppercase]
+    cols = []
+    for i, k in enumerate(keep):
+        c = np.array(colorsys.hsv_to_rgb((i * 0.137) % 1, 0.9, 0.95)) * 255; cols.append(c); mk = lab == k; im[mk] = im[mk] * .45 + c * .55
+    pi = Image.fromarray(im.astype("uint8")); dr = ImageDraw.Draw(pi)
+    for i, k in enumerate(keep):
+        yy, xx = np.nonzero(lab == k); j = np.argmin(yy)
+        dr.text((int(xx[j]) - 8, int(yy[j]) - F.size - 4), names[i], fill=tuple(int(v * .7) for v in cols[i]), font=F, stroke_width=3, stroke_fill=(255, 255, 255))
+        # 候補の通る所: 20px の升ごとの重心(x の順)
+        cells = {}
+        for x_, y_ in zip(xx[::7], yy[::7]): cells.setdefault((x_ // 20, y_ // 20), []).append((x_, y_))
+        pts = sorted([(int(np.mean([p[0] for p in v])), int(np.mean([p[1] for p in v]))) for v in cells.values()])
+        info.append(f"{names[i]}: x {xx.min()}〜{xx.max()}, y {yy.min()}〜{yy.max()}  通る所 " + " ".join(f"{p[0]},{p[1]}" for p in pts[::2]))
+    pi.save(out); print(f"{out}: 線の束の候補 {len(keep)} 個(色と記号)"); print("\n".join(info))
+
 def snap_preview(img, poly, out):
     im = Image.open(img).convert("RGBA"); r = draw_marks(im, [{"n": "", "kind": "front", "shape": "poly", "pts": poly}], font(18))
     xs = [p[0] for p in poly]; ys = [p[1] for p in poly]; x0, y0 = max(0, min(xs) - 40), max(0, min(ys) - 40); x1, y1 = min(im.width, max(xs) + 40), min(im.height, max(ys) + 40)
@@ -237,12 +274,14 @@ if __name__ == "__main__":
     g.add_argument("w", type=int, nargs="?", default=700); g.add_argument("h", type=int, nargs="?", default=700); g.add_argument("-o", default="")
     o = sp.add_parser("overview"); o.add_argument("img"); o.add_argument("-o", default="")
     c = sp.add_parser("check"); c.add_argument("img"); c.add_argument("marks"); c.add_argument("-o", default="")
+    bu = sp.add_parser("bundles"); bu.add_argument("img"); bu.add_argument("-o", default="")
     fl = sp.add_parser("fill"); fl.add_argument("img"); fl.add_argument("pt"); fl.add_argument("--gap", type=int, default=3); fl.add_argument("--max", type=int, default=250); fl.add_argument("--minw", type=int, default=9); fl.add_argument("--dashed", action="store_true"); fl.add_argument("--box", default=""); fl.add_argument("-o", default="")
     dt = sp.add_parser("dots"); dt.add_argument("img"); dt.add_argument("pt"); dt.add_argument("--r", type=int, default=11); dt.add_argument("-o", default="")
     sn = sp.add_parser("snap"); sn.add_argument("img"); sn.add_argument("pts", nargs="+"); sn.add_argument("-o", default="")
     b = sp.add_parser("band"); b.add_argument("w", type=float); b.add_argument("pts", nargs="+")
     a = ap.parse_args()
     if a.cmd == "band": print(json.dumps(band(a.w, [tuple(float(v) for v in p.split(",")) for p in a.pts]))); sys.exit()
+    if a.cmd == "bundles": bundles(a.img, a.o or os.path.splitext(a.img)[0] + "_bundles.png"); sys.exit()
     if a.cmd in ("fill", "dots"):
         pt = [float(v) for v in a.pt.split(",")]
         poly = fill(a.img, pt, a.gap, a.max, minw=a.minw, dashed=a.dashed, box=[int(v) for v in a.box.split(",")] if a.box else None) if a.cmd == "fill" else dots(a.img, pt, a.r); print(json.dumps(poly))
