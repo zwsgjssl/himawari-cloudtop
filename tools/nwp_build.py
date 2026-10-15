@@ -338,8 +338,16 @@ def main():
     ap.add_argument("--prev-dir", default="", help="前の nwp-img の中身(前の回の図を hist/ に残す)")
     a = ap.parse_args()
     kv = KV(a.dry_run or None)
-    old = kv.get(LATEST); head, parts = unpack(old) if old else ({}, {})
-    have = {c["id"]: c for c in head.get("charts", []) if c["id"] in parts}
+    old = kv.get(LATEST); head, parts_all = unpack(old) if old else ({}, {})
+    # v209 ユーザー「新しいのが解析完了するまでは古いのを表示でいいや」→ KV の charts(Map が見る物)は Claude が解析した版の図のまま出し、
+    #   新しく来た図は head["cur"](一番新しい図の一覧)と parts の "cur:<id>" に持っておく。解析(ai.lm)が追いついたら新しい図を出す(下の hold)
+    pub = {c["id"]: c for c in head.get("charts", []) if c["id"] in parts_all}
+    cur = {c["id"]: c for c in head.get("cur", head.get("charts", []))}
+    parts = {}
+    for k, c in cur.items():
+        b = parts_all.get("cur:" + k) or (parts_all.get(k) if pub.get(k, {}).get("lm") == c.get("lm") else None)
+        if b is not None: parts[k] = b
+    have = {k: c for k, c in cur.items() if k in parts}
     charts, changed = [], False
     # v201 地上天気図(先に並べる)
     for c, b in sfc_charts(have):
@@ -405,9 +413,21 @@ def main():
         except Exception as e: log(f"AI の解説: {e}"); x = None
         if x: ai = {**x, "base": next(iter(bases)), "at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ")}; changed = True
     elif len(bases) > 1: log("図の初期時刻がそろっていないので、AI の解説は待ちます: " + ", ".join(sorted(bases)))
-    if not changed: log("新しい図はありません。何もしません"); return
-    head = {"charts": charts, "ai": ai, "src": BASE, "attribution": "気象庁 数値予報天気図・地上天気図"}
-    blob = pack(head, {c["id"]: parts[c["id"]] for c in charts})
+    # v209 出す図: 解説(ai.lm)がこの図の前の版を見て書かれていて、その版を今出しているなら、解析が追いつくまでその版のまま(newer = 新しい図の時刻)
+    lm_ai = (ai or {}).get("lm") or {}
+    out_c, out_p = [], {}
+    for c in charts:
+        want, p = lm_ai.get(c["id"]), pub.get(c["id"])
+        if want and want != c.get("lm") and p and p.get("lm") == want:
+            out_c.append(dict(p, newer=c.get("valid") or c.get("base") or "")); out_p[c["id"]] = parts_all[c["id"]]; out_p["cur:" + c["id"]] = parts[c["id"]]
+        else:
+            out_c.append(c); out_p[c["id"]] = parts[c["id"]]
+    held = [c["id"] for c in out_c if c.get("newer")]
+    if held: log("解析が追いつくまで前の図を出す: " + ", ".join(held))
+    if not changed and [(c["id"], c.get("lm")) for c in out_c] == [(c["id"], c.get("lm")) for c in head.get("charts", [])]:
+        log("新しい図はありません。何もしません"); return
+    head = {"charts": out_c, "cur": charts, "ai": ai, "src": BASE, "attribution": "気象庁 数値予報天気図・地上天気図"}
+    blob = pack(head, out_p)
     kv.put(LATEST, blob)
     log(f"KV {LATEST} に書きました({len(blob)/1e6:.2f}MB、{len(charts)} 図" + (f"、AI の解説 {ai['base']}" if ai else "") + ")")
 
