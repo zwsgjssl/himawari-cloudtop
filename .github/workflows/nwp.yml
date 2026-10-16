@@ -1,6 +1,6 @@
 name: JMA NWP charts
 
-# v194 気象庁の数値予報天気図(AUPQ35・AUPQ78・AUPA20・AUPA25・AUPN30・FUPA252・FUPA302・FUPA502・FXJP854)の PDF を画像にして Cloudflare の KV に置く(tools/nwp_build.py)。
+# v194 気象庁の数値予報天気図(AUPQ35・AUPQ78・AUPA20・AUPA25・FUPA252・FUPA302・FUPA502・FXJP854)の PDF を画像にして Cloudflare の KV に置く(tools/nwp_build.py)。
 #  - 起動: Cloudflare の Worker の定期実行(worker/nwp.js の nwpCron、毎時 22 分)から。手で動かすときは Actions → JMA NWP charts → Run workflow。
 #  - 新しくなった図が無ければ KV に書かずにすぐ終わる。
 #  - AI の解説(任意): Secrets に ANTHROPIC_API_KEY があれば、全部の図の回がそろったとき、その回について 1 回だけ Claude API で作る(1 日 2 回ほど)。

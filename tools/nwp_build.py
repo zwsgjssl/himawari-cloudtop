@@ -4,7 +4,7 @@
 #   「(ポイントは決まったガイド)に加えて(その回の図の解説)も claude api 使ってできたりする!?」
 #
 # 図: https://www.jma.go.jp/bosai/numericmap/data/nwpmap/<名前>_00.pdf・_12.pdf(00UTC・12UTC の回。同じ名前で上書きされる)
-#   AUPQ35(300・500hPa 解析)・AUPQ78(700・850hPa 解析)・AUPA20(圏界面・200hPa ジェット)・AUPA25(250hPa)・AUPN30(300hPa 北半球)
+#   AUPQ35(300・500hPa 解析)・AUPQ78(700・850hPa 解析)・AUPA20(圏界面・200hPa ジェット)・AUPA25(250hPa)
 #   FUPA252・FUPA302・FUPA502(250・300・500hPa 24 時間予想)・FXJP854(850hPa 相当温位・風 12〜48 時間予想)
 #   _00 と _12 のうち更新(Last-Modified)が新しい方を使う。回(初期時刻)は Last-Modified の前の 00/12UTC
 #
@@ -51,7 +51,7 @@ CHARTS = [
     ("aupq78", "aupq78", "AUPQ78 700・850hPa 解析", 0),
     ("aupa20", "aupa20", "AUPA20 圏界面・200hPa ジェット 解析", 0),
     ("aupa25", "aupa25", "AUPA25 250hPa 解析", 0),
-    ("aupn30", "aupn30", "AUPN30 300hPa 解析(北半球)", 0),
+    # v223 ユーザー「aupn30 いらないね」→ AUPQ35 上段(300hPa)と被るので外した
     ("fupa252", "fupa252", "FUPA252 250hPa 24時間予想", 24),
     ("fupa302", "fupa302", "FUPA302 300hPa 24時間予想", 24),
     ("fupa502", "fupa502", "FUPA502 500hPa 24時間予想", 24),
@@ -61,7 +61,7 @@ CHARTS = [
 ]
 # v203 ユーザー「社内のシステムの表示順が ASAS FSAS AUPQ78 AUPQ35 AUPN30 AUPA25 AUPA20 FUPA502 FUPA302 FUPA252 AXJP130/140 FXJP106/112 だから、その順番で」
 #   (FXJP854 は社内の一覧に無いので最後)
-ORDER = ["spas", "fsas24", "aupq78", "aupq35", "aupn30", "aupa25", "aupa20", "fupa502", "fupa302", "fupa252", "axjp", "fxjp106", "fxjp854"]
+ORDER = ["spas", "fsas24", "aupq78", "aupq35", "aupa25", "aupa20", "fupa502", "fupa302", "fupa252", "axjp", "fxjp106", "fxjp854"]
 
 def log(*a): print(time.strftime("%H:%M:%S"), *a, flush=True)
 
