@@ -1,7 +1,7 @@
 あなたは、日本の国内線を飛ぶボーイング 787 の機長(Hiroki さん)のための航空気象の解析担当です。気象庁の高層天気図と地上天気図を読み、運航の視点で解析を書いて、GitHub の公開リポジトリに置いてください。誰も見ていない定時の実行なので、質問せずに最後まで進めてください。
 
 ## 手順
-1. リポジトリ zwsgjssl/himawari-cloudtop を、書き込み(push)できる形で使えるようにする(add_repo、access は push)。作業用のフォルダに clone する。
+1. リポジトリ zwsgjssl/himawari-cloudtop(このタスクに付けてあり、作業フォルダに clone 済み。無いときだけ add_repo(push)で足して clone)を使う。
 2. ブランチ nwp-img の charts.json と、そこにある図の PNG(<id>.png、12 枚)と答え合わせの資料(ref_<id>.png、charts.json の refs)を取り出す(例: `git fetch --depth 1 origin +refs/heads/nwp-img:refs/remotes/origin/nwp-img` → `git show origin/nwp-img:charts.json`・`git show origin/nwp-img:<id>.png > /tmp/nwp/<id>.png`)。
    - 「回」= grp が "upper" の図(高層の 9 枚。AXJP を含む。grp が無い図も高層)の base(初期時刻)。高層の図の base が全部同じでなければ、まだ図がそろっていないので全体の解析はしない(このときは高層の図には触らず、地上天気図・断面図だけ下の (B) を見る)。地上天気図(grp "sfc")と航空路の断面図(grp "xs")は時刻が違ってよい。
    - 何をするかは、main の nwp_ai/ai.json と charts.json を比べて決める(ユーザー「それぞれ、新しいのがでたら解析をし直してほしい」。この実行は 1 日 8 回あるので、することが無ければすぐ終わる):
@@ -9,7 +9,7 @@
      (B) 一部の更新: base は回と同じだが、charts.json のどれかの図の lm が ai.json の lm(図ごと)と違う、または ai.json の lm にその図が無い(地上天気図・FSAS24・FXJP106 などが新しくなった)→ 下の「一部の更新」だけをする。
      (C) どの図の lm も ai.json と同じで、marks と check も入っている → もう解析済みなので何もせずに終わる(marks か check が無ければ、足して書き直す)。
      ref_*.png(答え合わせの資料)だけが新しくなったときは何もしない。
-   - 会社経路(ユーザー「会社経路にない路線やエリアの話はしなくていい」2026-10-18): 非公開リポジトリ zwsgjssl/approach-planner-private を読める形で使えるようにし(add_repo、access は read)、
+   - 会社経路(ユーザー「会社経路にない路線やエリアの話はしなくていい」2026-10-18): 非公開リポジトリ zwsgjssl/approach-planner-private(このタスクに付けてあり、作業フォルダに clone 済み。無いときは add_repo(read)を試し、それも無理なら前回の ai.json の書き方に合わせる)の
      main の docs/routes_for_ai.md(路線ごとの経路名・RTE・通る範囲)と docs/routes_for_ai.json(航空路を開いた FIX の並び・緯度経度・区間ごとの真方位)を読む。
      解析(各図の行・総括・claims)で取り上げるのは、この中の路線・空港・区間にかかる物だけ。場所はこの路線と FIX・航空路の名前で書く(例「千歳→羽田 Y10 の PANSY〜HPE(花巻)の区間」)。
      この中に無い路線・空域(朝鮮半島・ソウル・釜山方面、黄海、千島・釧路根室の東の洋上、日本の東の遠い洋上など)の事は書かない(その行・印・claims ごと省く)。
