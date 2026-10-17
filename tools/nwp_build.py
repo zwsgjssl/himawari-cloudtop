@@ -288,6 +288,18 @@ def ai_from_file(base):
             ok.append(q)
         if ok: marks[cid] = ok
     if marks: out["marks"] = marks
+    # v237 Map の「SkAI の注意」: 範囲(box = [南, 北, 西, 東])・FL・時間つきの予想(claims)を Map の経路・断面図に重ねる。形を確かめて、おかしい物は捨てる
+    CK = {"cat", "cb", "wind", "other", "front", "jet", "moist", "icing"}
+    cl = []
+    for c in (a.get("claims") or [])[:40]:
+        if not isinstance(c, dict): continue
+        box = c.get("box"); fl = c.get("fl")
+        if not (isinstance(box, list) and len(box) == 4 and all(num(v) is not None for v in box)): continue
+        if fl is not None and not (isinstance(fl, list) and len(fl) == 2 and all(num(v) is not None for v in fl)): fl = None
+        cl.append({"id": str(c.get("id") or "c" + str(len(cl) + 1))[:12], "kind": c.get("kind") if c.get("kind") in CK else "other",
+                   "text": str(c.get("text") or "")[:240], "box": [float(v) for v in box], "fl": [float(v) for v in fl] if fl else None,
+                   "from": str(c.get("from") or "")[:20], "to": str(c.get("to") or "")[:20]})
+    if cl: out["claims"] = cl
     return out
 
 def write_img_dir(d, charts, parts, refs=()):
@@ -406,7 +418,7 @@ def main():
     bases = {c["base"] for c in charts if c.get("grp", "upper") == "upper"}   # v201 地上天気図は別の時刻でよい
     fa = ai_from_file(next(iter(bases))) if charts and len(bases) == 1 else None
     # v211 解説・印だけを手で直したとき(at が同じ)も取り込む: 中身のどこかが違えば取り込む(前は base・at・summary・check・lm だけを比べていて、charts・marks の直しが KV に入らなかった)
-    if fa and (not ai or any(ai.get(k) != fa.get(k) for k in ("base", "at", "summary", "check", "lm", "charts", "marks", "refs", "model"))):
+    if fa and (not ai or any(ai.get(k) != fa.get(k) for k in ("base", "at", "summary", "check", "lm", "charts", "marks", "refs", "model", "claims"))):
         ai = fa; changed = True; log(f"解説を取り込みました({AI_FILE}、{fa['base']}、{fa['model']})")
     elif fa: pass
     elif charts and len(bases) == 1 and os.environ.get("ANTHROPIC_API_KEY") and (a.force_ai or not ai or ai.get("base") != next(iter(bases))):
