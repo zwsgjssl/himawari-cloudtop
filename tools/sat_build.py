@@ -77,20 +77,24 @@ def render(K, band, t, path):
     name, warm, cold, title = BANDS[band]
     g = np.clip((warm - K) / (warm - cold), 0, 1)
     if band == "B08": g = g ** 0.8   # 暗域と明域の境目(バウンダリー)が見やすいように少し明るく
-    a = np.where(np.isfinite(K), np.rint(g * 255), 0).astype("u1")
-    im = Image.fromarray(a, "L").convert("RGB"); dr = ImageDraw.Draw(im)
+    # v2 灰色 240 段 + 線の色(減色で階段ができて、水蒸気の明暗の境目と見分けにくかったので、パレットを決めて直接作る)
+    a = np.where(np.isfinite(K), np.rint(g * 239), 0).astype("u1")
+    COL = {"grid": (240, (90, 90, 160)), "lab": (241, (255, 220, 0)), "coast": (242, (255, 210, 0)), "bg": (243, (0, 0, 0)), "txt": (244, (255, 255, 255))}
+    pal = []
+    for i in range(240): v = round(i * 255 / 239); pal += [v, v, v]
+    for _, (i, c) in sorted(COL.items(), key=lambda x: x[1][0]): pal += list(c)
+    im = Image.fromarray(a, "P"); im.putpalette(pal); dr = ImageDraw.Draw(im)
     H, W = a.shape
     def xy(lon, lat): return ((lon - LON0) / D, (LAT1 - lat) / D)
     for lat in range(25, 50, 5):
-        y = xy(LON0, lat)[1]; dr.line([(0, y), (W, y)], fill=(90, 90, 160), width=1); dr.text((3, y + 2), f"{lat}N", fill=(255, 220, 0))
+        y = xy(LON0, lat)[1]; dr.line([(0, y), (W, y)], fill=COL["grid"][0], width=1); dr.text((3, y + 2), f"{lat}N", fill=COL["lab"][0])
     for lon in range(120, 152, 5):
-        x = xy(lon, LAT1)[0]; dr.line([(x, 0), (x, H)], fill=(90, 90, 160), width=1); dr.text((x + 3, H - 14), f"{lon}E", fill=(255, 220, 0))
+        x = xy(lon, LAT1)[0]; dr.line([(x, 0), (x, H)], fill=COL["grid"][0], width=1); dr.text((x + 3, H - 14), f"{lon}E", fill=COL["lab"][0])
     try:
         C = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "coast_sat.json")))
-        for r in C["rings"]: dr.line([xy(lo, la) for lo, la in r], fill=(255, 210, 0), width=1)
+        for r in C["rings"]: dr.line([xy(lo, la) for lo, la in r], fill=COL["coast"][0], width=1)
     except Exception as e: log(f"海岸線が描けません: {e}")
-    dr.rectangle([0, 0, 400, 16], fill=(0, 0, 0)); dr.text((4, 3), f"Himawari-9 {title}  {t:%Y-%m-%d %H:%MZ}", fill=(255, 255, 255))
-    im = im.quantize(colors=200, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE)
+    dr.rectangle([0, 0, 400, 16], fill=COL["bg"][0]); dr.text((4, 3), f"Himawari-9 {title}  {t:%Y-%m-%d %H:%MZ}", fill=COL["txt"][0])
     im.save(path, optimize=True)
     log(f"{os.path.basename(path)} {im.size} {os.path.getsize(path)/1e3:.0f}KB")
 
