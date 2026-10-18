@@ -30,7 +30,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -39,7 +39,7 @@ jobs:
       - name: Install
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
-          pip install --quiet requests pillow numpy
+          pip install --quiet requests pillow numpy h5py satpy==0.60.0 pyresample==1.35.0   # v2 satpy = 衛星画像(tools/sat_build.py)
       - name: Build and upload
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
@@ -77,6 +77,8 @@ jobs:
           mkdir -p nwp_obs
           if git fetch -q --depth 1 origin +refs/heads/nwp-obs:refs/remotes/origin/nwp-obs 2>/dev/null; then git archive origin/nwp-obs | tar -x -C nwp_obs; fi
           python3 -u tools/obs_build.py --dir nwp_obs 2>&1 | tee nwp_obs/last_log.txt || true
+          # 定時の解析が雲のパターン(CAT・山岳波)を見るための、ひまわりの赤外・水蒸気の画像(正時の観測、新しい 6 時間分を sat/ に)
+          timeout 480 python3 -u tools/sat_build.py --dir nwp_obs/sat 2>&1 | tee -a nwp_obs/last_log.txt || true
           cd nwp_obs
           rm -rf .git && git init -q && git checkout -q -b nwp-obs && git add -A
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -qm "obs $(date -u +%Y-%m-%dT%H:%MZ)"
