@@ -186,7 +186,7 @@ def pilot(path):
             n = max(1, int(max(abs(c - a), abs(d - b)) / 0.25))
             seg += [(a + (c - a) * i / n, b + (d - b) * i / n) for i in range(n + 1)]
         for la, lo in seg:
-            out.append({"obsTime": r["t"].replace("Z", ":00"), "lat": la, "lon": lo, "fltLvl": r.get("fl"), "tbInt1": tb, "acType": "B787(本人)", "rawOb": f"本人 {r['t']} {r.get('from', '')}-{r.get('to', '')} FL{r.get('fl')} {r.get('tb')} {la:.2f},{lo:.2f}"})
+            out.append({"obsTime": r["t"].replace("Z", ":00"), "lat": la, "lon": lo, "fltLvl": r.get("fl"), "tbInt1": tb, "acType": "B787(他便)" if "他便" in str(r.get("note", "")) else "B787(本人)", "rawOb": f"{'他便' if '他便' in str(r.get('note', '')) else '本人'} {r['t']} {r.get('from', '')}-{r.get('to', '')} FL{r.get('fl')} {r.get('tb')} {la:.2f},{lo:.2f}"})
         rep.append((r, seg, tb))
     return out, rep
 
