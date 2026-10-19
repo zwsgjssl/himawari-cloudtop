@@ -181,7 +181,7 @@ def fill(img, seed, gap=3, mx=250, thr=150, minw=9, dashed=False, box=None):
     print(f"塗った広さ {reg.sum()} 画素", file=sys.stderr)
     return _poly_from_mask(reg)
 
-def dots(img, seed, r=14, thr=110, box=None, minarea=600, clip=False):
+def dots(img, seed, r=11, thr=110, box=None, minarea=600, clip=False):
     """v218 点々(小さな黒い点の集まり)の広がり。
     v2026-10-19 ユーザー「湿域が連続しているところでも分割されて塗られてる」→ 線・数字のそばの粒を捨てていたので、線や数字が横切る所で塊が切れていた。
       粒を捨てずに、まわり 15px に粒が 4 つ以上あり、それが縦横の 2 方向に並んでいる(格子の点々)粒だけを使う(経緯線の点線は 1 方向にしか並ばないので落ちる)。
@@ -196,7 +196,7 @@ def dots(img, seed, r=14, thr=110, box=None, minarea=600, clip=False):
     if not C: sys.exit("点々が無い")
     C = np.array(C); T = cKDTree(C); keep = np.zeros(len(C), bool)
     for i, nb in enumerate(T.query_ball_point(C, 15)):
-        if len(nb) < 4: continue
+        if len(nb) < 3: continue   # v2026-10-19 帯の端の 1 列の粒も拾う(前は 4)
         d = C[nb] - C[i]; d = d[np.any(d != 0, axis=1)]
         if len(d) < 3: continue
         w = np.linalg.eigvalsh(np.cov(d.T)); keep[i] = w[0] / max(w[1], 1e-6) > 0.2
@@ -207,7 +207,8 @@ def dots(img, seed, r=14, thr=110, box=None, minarea=600, clip=False):
     if box is not None:   # v2026-10-19 範囲の中の点々の塊を全部(ばらばらの湿域を 1 つの印に。parts)
         lab2, n2 = nd.label(m); x0, y0, x1, y1 = box; parts = []
         for k in range(1, n2 + 1):
-            reg = nd.binary_fill_holes(lab2 == k)
+            reg = lab2 == k; hole = nd.binary_fill_holes(reg) & ~reg; hl, hn = nd.label(hole)   # v2026-10-19 ユーザー「湿域じゃない所を塗ってる」→ 穴は小さい物(文字・線の跡)だけ埋める
+            if hn: hs = nd.sum(hole, hl, range(1, hn + 1)); reg = reg | np.isin(hl, [q + 1 for q, v in enumerate(hs) if v <= 1500])
             if clip: R = np.zeros_like(reg); R[y0:y1, x0:x1] = True; reg &= R   # 四角の外は切る(つながった大きな湿域の、運航に関係する所だけ)
             ys, xs = np.nonzero(reg)
             if reg.sum() < minarea or not ((xs >= x0) & (xs <= x1) & (ys >= y0) & (ys <= y1)).any(): continue
@@ -290,7 +291,7 @@ if __name__ == "__main__":
     c = sp.add_parser("check"); c.add_argument("img"); c.add_argument("marks"); c.add_argument("-o", default="")
     bu = sp.add_parser("bundles"); bu.add_argument("img"); bu.add_argument("-o", default="")
     fl = sp.add_parser("fill"); fl.add_argument("img"); fl.add_argument("pt"); fl.add_argument("--gap", type=int, default=3); fl.add_argument("--max", type=int, default=250); fl.add_argument("--minw", type=int, default=9); fl.add_argument("--dashed", action="store_true"); fl.add_argument("--box", default=""); fl.add_argument("-o", default="")
-    dt = sp.add_parser("dots"); dt.add_argument("img"); dt.add_argument("pt", help="x,y(点々の中) か、--box のときは x0,y0,x1,y1(この四角にかかる塊を全部)"); dt.add_argument("--r", type=int, default=14); dt.add_argument("--box", action="store_true"); dt.add_argument("--clip", action="store_true", help="--box の四角の外を切る"); dt.add_argument("-o", default="")
+    dt = sp.add_parser("dots"); dt.add_argument("img"); dt.add_argument("pt", help="x,y(点々の中) か、--box のときは x0,y0,x1,y1(この四角にかかる塊を全部)"); dt.add_argument("--r", type=int, default=11); dt.add_argument("--box", action="store_true"); dt.add_argument("--clip", action="store_true", help="--box の四角の外を切る"); dt.add_argument("-o", default="")
     sn = sp.add_parser("snap"); sn.add_argument("img"); sn.add_argument("pts", nargs="+"); sn.add_argument("-o", default="")
     b = sp.add_parser("band"); b.add_argument("w", type=float); b.add_argument("pts", nargs="+")
     a = ap.parse_args()
