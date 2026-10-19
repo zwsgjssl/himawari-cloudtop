@@ -281,9 +281,20 @@ def ai_from_file(base):
                 if None in v: continue
                 q.update(cx=v[0], cy=v[1], rx=v[2], ry=v[3], rot=num(m.get("rot")) or 0)
             elif sh in ("poly", "line"):
-                pts = [[num(p[0]), num(p[1])] for p in (m.get("pts") or []) if isinstance(p, list) and len(p) == 2]
-                if len(pts) < 2 or any(None in p for p in pts): continue
-                q["pts"] = pts[:60]
+                # v2026-10-19 ユーザー「AUPQ の湿域の塗り方変」→ 前は先頭の 60 点で切っていて、形の後ろ半分が直線で閉じられていた。
+                #   点が多いときは間引く(形全体を残す)。parts = ばらばらの塊(点々の湿域など)。全部で 600 点まで
+                def P_(L, mx):
+                    L = [[num(p[0]), num(p[1])] for p in (L or []) if isinstance(p, list) and len(p) == 2]
+                    if len(L) < 2 or any(None in p for p in L): return None
+                    if len(L) > mx: st = len(L) / mx; L = [L[int(i * st)] for i in range(mx)]
+                    return [[round(p[0], 1), round(p[1], 1)] for p in L]
+                pts = P_(m.get("pts"), 150)
+                if not pts: continue
+                q["pts"] = pts
+                if sh == "poly" and isinstance(m.get("parts"), list):
+                    pp = [x for x in (P_(L, 150) for L in m["parts"][:20]) if x and len(x) >= 3]
+                    while sum(map(len, pp)) > 600: pp = [L[::2] if len(L) > 12 else L for L in pp]
+                    if pp: q["parts"] = pp
             else: continue
             ok.append(q)
         if ok: marks[cid] = ok

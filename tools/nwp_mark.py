@@ -78,8 +78,8 @@ def draw_marks(im, marks, F):
                    for t in [i * 2 * math.pi / 72 for i in range(72)]]
             d.polygon(pts, fill=fill, outline=edge, width=3); lx, ly = cx, cy
         elif sh == "poly":
-            pts = [tuple(p) for p in m["pts"]]; d.polygon(pts, fill=fill, outline=edge, width=3)
-            lx, ly = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
+            for P in (m.get("parts") or [m["pts"]]): d.polygon([tuple(p) for p in P], fill=fill, outline=edge, width=3)
+            pts = [tuple(p) for p in m["pts"]]; lx, ly = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
         else:
             pts = [tuple(p) for p in m["pts"]]; d.line(pts, fill=c + (170,), width=10, joint="curve"); lx, ly = pts[0]
         d.ellipse([lx - 13, ly - 13, lx + 13, ly + 13], fill=(255, 255, 255, 230), outline=edge, width=2)
@@ -181,7 +181,7 @@ def fill(img, seed, gap=3, mx=250, thr=150, minw=9, dashed=False, box=None):
     print(f"塗った広さ {reg.sum()} 画素", file=sys.stderr)
     return _poly_from_mask(reg)
 
-def dots(img, seed, r=11, thr=110):
+def dots(img, seed, r=11, thr=110, box=None, minarea=600):
     """v218 点々(小さな黒い点の集まり)の広がり"""
     import numpy as np
     from scipy import ndimage as nd
@@ -201,6 +201,14 @@ def dots(img, seed, r=11, thr=110):
     m = nd.binary_dilation(dm, disk)   # 粒を r 太らせてつなぐ(線をまたいで 2 粒抜けても切れない)→ 縁を粒の外 4px まで戻す
     e = max(1, r - 4); Y2, X2 = np.ogrid[-e:e + 1, -e:e + 1]; m = nd.binary_erosion(m, X2 * X2 + Y2 * Y2 <= e * e)
     Y3, X3 = np.ogrid[-6:7, -6:7]; m = nd.binary_opening(m, X3 * X3 + Y3 * Y3 <= 36)   # 経緯線に沿った細いひげを落とす
+    if box is not None:   # v2026-10-19 範囲の中の点々の塊を全部(ばらばらの湿域を 1 つの印に。parts)
+        lab2, n2 = nd.label(m); x0, y0, x1, y1 = box; parts = []
+        for k in range(1, n2 + 1):
+            reg = nd.binary_fill_holes(lab2 == k); ys, xs = np.nonzero(reg)
+            if reg.sum() < minarea or not ((xs >= x0) & (xs <= x1) & (ys >= y0) & (ys <= y1)).any(): continue
+            parts.append(_poly_from_mask(reg))
+        if not parts: sys.exit("範囲の中に点々の塊が無い")
+        print(f"点々の塊 {len(parts)} 個", file=sys.stderr); return parts
     lab2, _ = nd.label(m); sx, sy = int(seed[0]), int(seed[1]); L = lab2[sy, sx]
     if not L:
         ys, xs = np.nonzero(lab2[max(0, sy - 30):sy + 31, max(0, sx - 30):sx + 31])
@@ -252,7 +260,8 @@ def snap_preview(img, poly, out):
 def bbox(m):
     if m.get("shape") == "ellipse":
         r = max(m["rx"], m["ry"]); return m["cx"] - r, m["cy"] - r, m["cx"] + r, m["cy"] + r
-    xs = [p[0] for p in m["pts"]]; ys = [p[1] for p in m["pts"]]; return min(xs), min(ys), max(xs), max(ys)
+    Q = [p for P in (m.get("parts") or [m["pts"]]) for p in P]
+    xs = [p[0] for p in Q]; ys = [p[1] for p in Q]; return min(xs), min(ys), max(xs), max(ys)
 
 def check(img, mfile, head):
     im = Image.open(img).convert("RGBA"); W, H = im.size
@@ -276,7 +285,7 @@ if __name__ == "__main__":
     c = sp.add_parser("check"); c.add_argument("img"); c.add_argument("marks"); c.add_argument("-o", default="")
     bu = sp.add_parser("bundles"); bu.add_argument("img"); bu.add_argument("-o", default="")
     fl = sp.add_parser("fill"); fl.add_argument("img"); fl.add_argument("pt"); fl.add_argument("--gap", type=int, default=3); fl.add_argument("--max", type=int, default=250); fl.add_argument("--minw", type=int, default=9); fl.add_argument("--dashed", action="store_true"); fl.add_argument("--box", default=""); fl.add_argument("-o", default="")
-    dt = sp.add_parser("dots"); dt.add_argument("img"); dt.add_argument("pt"); dt.add_argument("--r", type=int, default=11); dt.add_argument("-o", default="")
+    dt = sp.add_parser("dots"); dt.add_argument("img"); dt.add_argument("pt", help="x,y(点々の中) か、--box のときは x0,y0,x1,y1(この四角にかかる塊を全部)"); dt.add_argument("--r", type=int, default=11); dt.add_argument("--box", action="store_true"); dt.add_argument("-o", default="")
     sn = sp.add_parser("snap"); sn.add_argument("img"); sn.add_argument("pts", nargs="+"); sn.add_argument("-o", default="")
     b = sp.add_parser("band"); b.add_argument("w", type=float); b.add_argument("pts", nargs="+")
     a = ap.parse_args()
@@ -284,6 +293,10 @@ if __name__ == "__main__":
     if a.cmd == "bundles": bundles(a.img, a.o or os.path.splitext(a.img)[0] + "_bundles.png"); sys.exit()
     if a.cmd in ("fill", "dots"):
         pt = [float(v) for v in a.pt.split(",")]
+        if a.cmd == "dots" and a.box:
+            parts = dots(a.img, None, a.r, box=[int(v) for v in pt]); print(json.dumps({"shape": "poly", "pts": max(parts, key=len), "parts": parts}))   # pts = 一番大きい塊(番号の丸の位置)、parts = 全部
+            if a.o: snap_preview(a.img, [q for P in parts for q in P + [P[0]]], a.o)
+            sys.exit()
         poly = fill(a.img, pt, a.gap, a.max, minw=a.minw, dashed=a.dashed, box=[int(v) for v in a.box.split(",")] if a.box else None) if a.cmd == "fill" else dots(a.img, pt, a.r); print(json.dumps(poly))
         if a.o: snap_preview(a.img, poly, a.o)
         sys.exit()
