@@ -10,7 +10,7 @@
 #     taf   … 主な空港の TAF(aviationweather.gov)。v219 ユーザー「WX 解析の答え合わせに TAF って有用じゃない?」。
 #             新しく出た TAF だけ(同じ空港・同じ発表時刻をその日と前の日の記録で見たら入れない)。{id, issue, from, to, raw}
 #   どれかが取れなくても、取れた物だけで記録する(ログに理由)。同じ時刻をもう記録していれば、足りない物だけ取り直す
-import argparse, datetime as dt, email.utils, gzip, io, json, math, os, sys, time
+import argparse, warnings, datetime as dt, email.utils, gzip, io, json, math, os, sys, time
 import numpy as np, requests
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from nwp_build import KV, unpack, UA, log
@@ -117,7 +117,7 @@ def obs_hima(kv):
 #   jet = FL300〜450 の最大風速(kt)と その FL、vws = FL250〜450 の上下の層の風の差(kt/1000ft)、ti1 = Ellrod TI1(×1e-7/s²、FL250〜450)。vws・ti1 は升の中の 90 パーセンタイルの、一番大きい層の値、
 #   trop = 圏界面の FL(升の平均)、fz = 0℃ の高さ(FL、升の平均)、ice = 湿度 85% 以上・気温 0〜−15℃ の層の FL [下, 上]
 #   T+0 は観測を取り込んだ直後の値なので、ジェット・シアー・圏界面の「実際に近い姿」として事後検証に使う(観測そのものではない)。T+12 は気象庁の予想と比べる 2 つ目のモデル
-UK_V = 5   # v210 TI1 の分布(ti1_dist。Map のしきい値を決めるため)を足した。 v209 絶対渦度(慣性不安定)を足した。v208 風向・風向の変わり方・Ri を足した。 v208 風向・風向の変わり方・Ri を足した。 まとめ方を変えたら上げる(同じ回でも作り直す)
+UK_V = 6   # v2026-10-19 高さごとの TI1(tiz)・Ri(riz)を足した。  # v210 TI1 の分布(ti1_dist。Map のしきい値を決めるため)を足した。 v209 絶対渦度(慣性不安定)を足した。v208 風向・風向の変わり方・Ri を足した。 v208 風向・風向の変わり方・Ri を足した。 まとめ方を変えたら上げる(同じ回でも作り直す)
 def p2fl(p): return (1 - (np.asarray(p, float) / 1013.25) ** 0.190263) * 145442.16 / 100
 def obs_ukmo(kv, d):
     import warnings; warnings.simplefilter("ignore", RuntimeWarning)   # 全部が欠けの升の nanmax
@@ -179,7 +179,12 @@ def obs_ukmo(kv, d):
         dvdx = np.gradient(Vm, xx, axis=2) / coslat; dudy = np.gradient(Um * coslat, yy, axis=1) / coslat
         ETA = (dvdx - dudy + 2 * OM * np.sin(np.radians(lat))[:, None]) * 1e5
         ETA = np.where(up[:, None, None], ETA, np.nan)
-        rec = {"t": s["t"], "jet": {}, "vws": {}, "ti1": {}, "trop": {}, "fz": {}, "ice": {}, "wind": {}, "turn": {}, "ri": {}, "avo": {}}
+        rec = {"t": s["t"], "jet": {}, "vws": {}, "ti1": {}, "trop": {}, "fz": {}, "ice": {}, "wind": {}, "turn": {}, "ri": {}, "avo": {}, "tiz": {}, "riz": {}}
+        # v2026-10-19 ユーザー「Ri と TI1 見ても上の方が揺れ小さそうよね」(羽田〜千歳: 芯 FL390 より上は smooth、FL330〜370 は L〜LP)
+        #   → AI が CAT の高さの範囲を「芯 ± 5000ft」でなく層で決められるように、高さごとの値も置く:
+        #   tiz = prof_fl の各面の TI1(升の 90 パーセンタイル)、riz = ri_fl の各層(隣の面の間)の Ri(升の 10 パーセンタイル)
+        MI = [k for k in range(L) if mid[k]]; LI = [k for k in range(L - 1) if mid[k] and mid[k + 1]]
+        out["prof_fl"] = [int(round(FL[k] / 10) * 10) for k in MI]; out["ri_fl"] = [int(round((FL[k] + FL[k + 1]) / 20) * 10) for k in LI]
         with np.errstate(all="ignore"):
             for i, ri in rows.items():
                 for j, cj in cols.items():
@@ -205,6 +210,16 @@ def obs_ukmo(kv, d):
                     if np.isfinite(t_).any(): rec["turn"][k] = int(round(float(np.nanmax(np.nanpercentile(t_, 90, axis=1)))))
                     r_ = RI[(slice(None),) + sl].reshape(RI.shape[0], -1)
                     if np.isfinite(r_).any(): rec["ri"][k] = round(float(np.nanmin(np.nanpercentile(r_, 10, axis=1))), 2)
+                    if np.isfinite(r_).any():
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore"); rp = np.nanpercentile(r_, 10, axis=1)
+                        rec["riz"][k] = [None if not np.isfinite(rp[q]) else round(float(rp[q]), 2) for q in LI]
+                    if TI is not None:
+                        tz = TI[MI][(slice(None),) + sl].reshape(len(MI), -1)
+                        if np.isfinite(tz).any():
+                            with warnings.catch_warnings():
+                                warnings.simplefilter("ignore"); tp_ = np.nanpercentile(tz, 90, axis=1)
+                            rec["tiz"][k] = [None if not np.isfinite(v_) else round(float(v_), 1) for v_ in tp_]
                     e_ = ETA[(slice(None),) + sl].reshape(L, -1)
                     if np.isfinite(e_).any():
                         rec["avo"][k] = [round(float(np.nanmin(np.nanpercentile(e_, 10, axis=1))), 1), int(round(float(np.nanmax(np.nanmean(np.where(np.isfinite(e_), e_ < 0, np.nan), axis=1)) * 100)))]
