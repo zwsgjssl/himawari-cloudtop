@@ -158,10 +158,11 @@ def cat_indices(Tc, Ukt, Vkt, lat, dlat, dlon):
     z = np.concatenate([np.zeros_like(TK[:1]), np.cumsum(dzl, axis=0)])
     th = TK * (1000.0 / p) ** 0.2857
     L = TK.shape[0]; lo = np.r_[0, np.arange(L - 1)]; hi = np.r_[np.arange(1, L), L - 1]   # 上下の面(端は片側)
-    dz = z[hi] - z[lo]
-    VWS = np.hypot(u[hi] - u[lo], v[hi] - v[lo]) / dz                        # s⁻¹
-    N2 = 9.80665 * (th[hi] - th[lo]) / (th * dz)
-    Ri = N2 / np.maximum(VWS * VWS, 1e-12)
+    # v2026-10-19 ユーザー「平面図で上の高度のほうが中間高度より TI1 小さい」(羽田〜花巻 FL350〜FL390 で LP〜MOD の日):
+    #   前は 1 つ上と 1 つ下の面の差 → ジェットの芯の高さでは上下とも弱いので打ち消し合い、芯のすぐ下の強いシアーが消えていた。
+    #   上・下の隣の面との差の大きい方にする(端は片側)。全体に 3 割ほど大きく出る(Map のしきい値も 10・16・22 に)
+    sh = np.hypot(u[1:] - u[:-1], v[1:] - v[:-1]) / dzl                      # 隣どうしの層のシアー s⁻¹ [L-1]
+    VWS = np.zeros_like(u); VWS[:-1] = sh; VWS[1:] = np.maximum(VWS[1:], sh)
     dy = R_EARTH * np.deg2rad(dlat); dx = (R_EARTH * np.cos(np.deg2rad(lat)) * np.deg2rad(dlon))[None, :, None]
     dudx, dudy = np.gradient(u, axis=2) / dx, np.gradient(u, axis=1) / dy
     dvdx, dvdy = np.gradient(v, axis=2) / dx, np.gradient(v, axis=1) / dy
