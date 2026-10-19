@@ -199,4 +199,4 @@
 - 図が読めない・壊れているときは、ai.json を書かずに、その理由を報告して終わる。
 - 図の出る時刻(UTC。nwp-img には毎時 22 分に入る): 高層 03:36・15:36、AXJP 01:50・13:50 ごろ、SPAS・FXJP106 は 3 時間ごと(初期時刻の 2 時間ほど後)、FSAS24 07:08・19:03。
 - 解析は main に push するとすぐ GitHub Actions が取り込み(nwp_ai/ai.json の push で動く)、アプリの WX保存で反映される。アプリでは marks が図に色付きで描かれ、解説の ①② の行と結び付く。check・verify はアプリに出さない(内部の記録)。
-- claims(cat・cb・other で fl がある物)は、Map の「AI解析」として、断面図で経路が box を通る所に箱で出る(時間は from〜to)。断面図の札には text の中の強さ(LGT- 〜MOD)・「MOD の可能性」(→「LGT〜MOD?」。MOD の決まりを守る)・CB の雲頂・「山岳波」がそのまま出て、押すと text の全文が出る。だから text には強さを 1 つの書き方でだけ書く(「LGT〜LGT+」と「MOD」を別々に書いて食い違わせない)。
+- claims(cat・cb・other で fl がある物)は、Map の「AI解析」として、断面図で経路が box を通る所に箱で出る(時間は from〜to)。断面図の札には text の中の強さ(LGT- 〜MOD)・「MOD の可能性」(→「LGT〜MOD?」。MOD の決まりを守る)・CB の雲頂・「山岳波」がそのまま出て、押すと text の全文が出る。だから text には強さを 1 つの書き方でだけ書く(「LGT〜LGT+」と「MOD」を別々に書いて食い違わせない)。強さは text の最後に「(LGT+)」「(LGT〜LGT+)」のように括弧で 1 回だけ書く。根拠の PIREP・SIGMET の強さは「MOD の PIREP 1 つ」「SIGMET SEV TURB」の形で書く(アプリはこの形を強さと読まない。2026-10-20 ユーザー「広範囲が MOD に見えちゃう」)。
