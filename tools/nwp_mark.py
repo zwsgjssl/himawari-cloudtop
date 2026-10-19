@@ -181,26 +181,29 @@ def fill(img, seed, gap=3, mx=250, thr=150, minw=9, dashed=False, box=None):
     print(f"塗った広さ {reg.sum()} 画素", file=sys.stderr)
     return _poly_from_mask(reg)
 
-def dots(img, seed, r=11, thr=110, box=None, minarea=600):
-    """v218 点々(小さな黒い点の集まり)の広がり"""
+def dots(img, seed, r=14, thr=110, box=None, minarea=600):
+    """v218 点々(小さな黒い点の集まり)の広がり。
+    v2026-10-19 ユーザー「湿域が連続しているところでも分割されて塗られてる」→ 線・数字のそばの粒を捨てていたので、線や数字が横切る所で塊が切れていた。
+      粒を捨てずに、まわり 15px に粒が 4 つ以上あり、それが縦横の 2 方向に並んでいる(格子の点々)粒だけを使う(経緯線の点線は 1 方向にしか並ばないので落ちる)。
+      粒を r 太らせてつなぎ(線・数字をまたぐ)、縁を粒の外 5px まで戻す"""
     import numpy as np
     from scipy import ndimage as nd
+    from scipy.spatial import cKDTree
     g = np.asarray(Image.open(img).convert("L")); lab, n = nd.label(g < thr, np.ones((3, 3)))
-    sz = nd.sum(np.ones_like(lab), lab, range(1, n + 1)); sl = nd.find_objects(lab)
-    ok = np.zeros(n + 1, bool)
-    for i, (s_, z) in enumerate(zip(sl, sz), 1):   # 点々の 1 粒 = 1〜4 画素・3×3 以内(JMA の図は 2×1 の粒が 9px おき)
-        ok[i] = z <= 4 and s_[0].stop - s_[0].start <= 3 and s_[1].stop - s_[1].start <= 3
-    dm = ok[lab]
-    near = nd.binary_dilation(dm, np.ones((5, 5), bool))   # 粒のまわり 2px に、ほかの黒い物(線のかけら)が無いこと
-    other = (g < 215) & ~nd.binary_dilation(dm, np.ones((3, 3), bool))   # 薄い経緯線のかけらも「ほかの物」に数える
-    bad = nd.binary_dilation(other, np.ones((5, 5), bool)) & dm
-    badlab = np.unique(lab[bad]); ok[badlab] = False; dm = ok[lab]
-    nb = nd.uniform_filter(dm.astype(float), 25) * 625   # 近くに粒が 4 つ以上ある粒だけ(ばらばらの小さな汚れを除く)
-    dm &= nb >= 5
-    Y, X = np.ogrid[-r:r + 1, -r:r + 1]; disk = X * X + Y * Y <= r * r
-    m = nd.binary_dilation(dm, disk)   # 粒を r 太らせてつなぐ(線をまたいで 2 粒抜けても切れない)→ 縁を粒の外 4px まで戻す
-    e = max(1, r - 4); Y2, X2 = np.ogrid[-e:e + 1, -e:e + 1]; m = nd.binary_erosion(m, X2 * X2 + Y2 * Y2 <= e * e)
-    Y3, X3 = np.ogrid[-6:7, -6:7]; m = nd.binary_opening(m, X3 * X3 + Y3 * Y3 <= 36)   # 経緯線に沿った細いひげを落とす
+    sz = nd.sum(np.ones_like(lab), lab, range(1, n + 1)); sl = nd.find_objects(lab); C = []
+    for s_, z in zip(sl, sz):   # 点々の 1 粒 = 1〜4 画素・3×3 以内(JMA の図は 2×1 の粒が 9px おき)
+        if z <= 4 and s_[0].stop - s_[0].start <= 3 and s_[1].stop - s_[1].start <= 3: C.append(((s_[1].start + s_[1].stop - 1) / 2, (s_[0].start + s_[0].stop - 1) / 2))
+    if not C: sys.exit("点々が無い")
+    C = np.array(C); T = cKDTree(C); keep = np.zeros(len(C), bool)
+    for i, nb in enumerate(T.query_ball_point(C, 15)):
+        if len(nb) < 4: continue
+        d = C[nb] - C[i]; d = d[np.any(d != 0, axis=1)]
+        if len(d) < 3: continue
+        w = np.linalg.eigvalsh(np.cov(d.T)); keep[i] = w[0] / max(w[1], 1e-6) > 0.2
+    K = C[keep]; dm = np.zeros(g.shape, bool); dm[K[:, 1].astype(int), K[:, 0].astype(int)] = True
+    Y, X = np.ogrid[-r:r + 1, -r:r + 1]; m = nd.binary_dilation(dm, X * X + Y * Y <= r * r)
+    e = max(1, r - 5); Y2, X2 = np.ogrid[-e:e + 1, -e:e + 1]; m = nd.binary_erosion(m, X2 * X2 + Y2 * Y2 <= e * e)
+    m = nd.binary_opening(m, np.ones((9, 9), bool))   # 細いひげを落とす
     if box is not None:   # v2026-10-19 範囲の中の点々の塊を全部(ばらばらの湿域を 1 つの印に。parts)
         lab2, n2 = nd.label(m); x0, y0, x1, y1 = box; parts = []
         for k in range(1, n2 + 1):
@@ -285,7 +288,7 @@ if __name__ == "__main__":
     c = sp.add_parser("check"); c.add_argument("img"); c.add_argument("marks"); c.add_argument("-o", default="")
     bu = sp.add_parser("bundles"); bu.add_argument("img"); bu.add_argument("-o", default="")
     fl = sp.add_parser("fill"); fl.add_argument("img"); fl.add_argument("pt"); fl.add_argument("--gap", type=int, default=3); fl.add_argument("--max", type=int, default=250); fl.add_argument("--minw", type=int, default=9); fl.add_argument("--dashed", action="store_true"); fl.add_argument("--box", default=""); fl.add_argument("-o", default="")
-    dt = sp.add_parser("dots"); dt.add_argument("img"); dt.add_argument("pt", help="x,y(点々の中) か、--box のときは x0,y0,x1,y1(この四角にかかる塊を全部)"); dt.add_argument("--r", type=int, default=11); dt.add_argument("--box", action="store_true"); dt.add_argument("-o", default="")
+    dt = sp.add_parser("dots"); dt.add_argument("img"); dt.add_argument("pt", help="x,y(点々の中) か、--box のときは x0,y0,x1,y1(この四角にかかる塊を全部)"); dt.add_argument("--r", type=int, default=14); dt.add_argument("--box", action="store_true"); dt.add_argument("-o", default="")
     sn = sp.add_parser("snap"); sn.add_argument("img"); sn.add_argument("pts", nargs="+"); sn.add_argument("-o", default="")
     b = sp.add_parser("band"); b.add_argument("w", type=float); b.add_argument("pts", nargs="+")
     a = ap.parse_args()
