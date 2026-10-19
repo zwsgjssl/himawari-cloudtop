@@ -255,13 +255,15 @@ def cc_edr(S, cs):
 
 # ---- v138 雲(VSD 用): 気圧面の相対湿度 ----
 # 雲そのもの(cloud_amount_on_height_levels)は高さ 6km くらいまでしか無いので、全部の気圧面にある相対湿度から雲を推し量る(雲量は Map で Sundqvist の式)。
-# 0℃ 未満は氷に対する湿度にそろえる: Met Office の値が水に対するものなら(-40℃ 以下で 99.9% 値が 85% 未満 = 氷の飽和に届いていない)、es_w/es_i を掛ける。
+# 0℃ 未満は氷に対する湿度にそろえる: Met Office の値が水に対するものなら(-40℃ 以下で 99.9% 値が 95% 未満 = 氷の飽和に届いていない)、es_w/es_i を掛ける。
 def rh_bytes(RH, Tc, lead):
     RH = np.asarray(RH, dtype="f8")
     if np.nanmax(RH) <= 1.5: RH = RH * 100.0           # 0〜1 で来たら %
     cold = Tc < -40
     p999 = float(np.nanpercentile(RH[cold], 99.9)) if np.any(cold) else 100.0
-    water = p999 < 85.0
+    # v2026-10-19 ユーザー「羽田千歳の断面図、赤外では雲が多いのに断面図は下層しか雲が無い」→ 18Z の回は 99.9% 値が 85.4% で「氷」と判定され、
+    #   上層の雲(UKMET 自身の上層雲量 100% の所で RH 60〜75%)が消えていた。氷に対する値なら上層の雲の中は 100% 前後になるので、95% 未満なら水に対する値とみなす
+    water = p999 < 95.0
     if water:
         esw = 6.112 * np.exp(17.67 * Tc / (Tc + 243.5)); esi = 6.112 * np.exp(22.46 * Tc / (Tc + 272.62))
         RH = np.where(Tc < 0, RH * esw / esi, RH)
