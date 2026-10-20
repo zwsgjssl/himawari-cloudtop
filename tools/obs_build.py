@@ -117,7 +117,7 @@ def obs_hima(kv):
 #   jet = FL300〜450 の最大風速(kt)と その FL、vws = FL250〜450 の上下の層の風の差(kt/1000ft)、ti1 = Ellrod TI1(×1e-7/s²、FL250〜450)。vws・ti1 は升の中の 90 パーセンタイルの、一番大きい層の値、
 #   trop = 圏界面の FL(升の平均)、fz = 0℃ の高さ(FL、升の平均)、ice = 湿度 85% 以上・気温 0〜−15℃ の層の FL [下, 上]
 #   T+0 は観測を取り込んだ直後の値なので、ジェット・シアー・圏界面の「実際に近い姿」として事後検証に使う(観測そのものではない)。T+12 は気象庁の予想と比べる 2 つ目のモデル
-UK_V = 6   # v2026-10-19 高さごとの TI1(tiz)・Ri(riz)を足した。  # v210 TI1 の分布(ti1_dist。Map のしきい値を決めるため)を足した。 v209 絶対渦度(慣性不安定)を足した。v208 風向・風向の変わり方・Ri を足した。 v208 風向・風向の変わり方・Ri を足した。 まとめ方を変えたら上げる(同じ回でも作り直す)
+UK_V = 7   # v2026-10-20 ユーザー「TI1 廃止で Ri とシアーでいい」→ 高さごとのシアー(vwz)とシアーの分布(vws_dist)を足した。 v2026-10-19 高さごとの TI1(tiz)・Ri(riz)を足した。  # v210 TI1 の分布(ti1_dist。Map のしきい値を決めるため)を足した。 v209 絶対渦度(慣性不安定)を足した。v208 風向・風向の変わり方・Ri を足した。 v208 風向・風向の変わり方・Ri を足した。 まとめ方を変えたら上げる(同じ回でも作り直す)
 def p2fl(p): return (1 - (np.asarray(p, float) / 1013.25) ** 0.190263) * 145442.16 / 100
 def obs_ukmo(kv, d):
     import warnings; warnings.simplefilter("ignore", RuntimeWarning)   # 全部が欠けの升の nanmax
@@ -156,6 +156,12 @@ def obs_ukmo(kv, d):
         Sj = np.where(up[:, None, None], S, np.nan)
         dV = np.hypot(np.diff(U, axis=0), np.diff(V, axis=0)) / (np.diff(FL)[:, None, None] / 10)   # kt / 1000ft
         okv = (mid[:-1] & mid[1:])[:, None, None]; VW = np.where(okv, dV, np.nan)
+        # v2026-10-20 シアーの分布(日本付近 24〜46N・122〜148E の FL290〜420 の層。AI の強さの段を決めるため)
+        jl = (lat >= 24) & (lat <= 46); jo = (lon >= 122) & (lon <= 148); lmid = (FL[:-1] + FL[1:]) / 2; ls = (lmid >= 290) & (lmid <= 420)
+        vv = dV[ls][:, jl][:, :, jo].ravel(); vv = vv[np.isfinite(vv)]
+        if vv.size:
+            out.setdefault("vws_dist", {})["t0" if s.get("lead") == 0 else "f12"] = {"n": int(vv.size), "pct": {str(q): round(float(np.percentile(vv, q)), 1) for q in (50, 75, 90, 95, 98, 99, 99.5)},
+                "ge": {str(t): round(float((vv >= t).mean() * 100), 2) for t in (6, 9, 12, 15)}}
         fzi = np.argmax(T <= 0, axis=0); fz = np.where(np.any(T <= 0, axis=0), FL[fzi], np.nan)
         ic = (RH >= 85) & (T <= 0) & (T >= -15) if RH is not None else None
         # v208 ユーザー「風速は弱いけど風向が変わるからだと思う」→ 風向とその変わり方、リチャードソン数(Ri)も
@@ -179,7 +185,7 @@ def obs_ukmo(kv, d):
         dvdx = np.gradient(Vm, xx, axis=2) / coslat; dudy = np.gradient(Um * coslat, yy, axis=1) / coslat
         ETA = (dvdx - dudy + 2 * OM * np.sin(np.radians(lat))[:, None]) * 1e5
         ETA = np.where(up[:, None, None], ETA, np.nan)
-        rec = {"t": s["t"], "jet": {}, "vws": {}, "ti1": {}, "trop": {}, "fz": {}, "ice": {}, "wind": {}, "turn": {}, "ri": {}, "avo": {}, "tiz": {}, "riz": {}}
+        rec = {"t": s["t"], "jet": {}, "vws": {}, "ti1": {}, "trop": {}, "fz": {}, "ice": {}, "wind": {}, "turn": {}, "ri": {}, "avo": {}, "tiz": {}, "riz": {}, "vwz": {}}
         # v2026-10-19 ユーザー「Ri と TI1 見ても上の方が揺れ小さそうよね」(羽田〜千歳: 芯 FL390 より上は smooth、FL330〜370 は L〜LP)
         #   → AI が CAT の高さの範囲を「芯 ± 5000ft」でなく層で決められるように、高さごとの値も置く:
         #   tiz = prof_fl の各面の TI1(升の 90 パーセンタイル)、riz = ri_fl の各層(隣の面の間)の Ri(升の 10 パーセンタイル)
@@ -197,6 +203,10 @@ def obs_ukmo(kv, d):
                     # シアー・TI1 は 10km の格子で 1 点だけ飛び抜けることがあるので、升の中の上位 10%(90 パーセンタイル)を層ごとに出して、一番大きい層の値
                     vw = VW[(slice(None),) + sl].reshape(VW.shape[0], -1)
                     if np.isfinite(vw).any(): rec["vws"][k] = round(float(np.nanmax(np.nanpercentile(vw, 90, axis=1))), 1)
+                    if np.isfinite(vw).any():   # v2026-10-20 vwz = ri_fl の各層のシアー(kt/1000ft、升の 90 パーセンタイル)
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore"); vp = np.nanpercentile(vw, 90, axis=1)
+                        rec["vwz"][k] = [None if not np.isfinite(vp[q]) else round(float(vp[q]), 1) for q in LI]
                     if TI is not None:
                         t_ = TI[mid][(slice(None),) + sl].reshape(int(mid.sum()), -1)
                         if t_.size and np.isfinite(t_).any(): rec["ti1"][k] = round(float(np.nanmax(np.nanpercentile(t_, 90, axis=1))), 1)
