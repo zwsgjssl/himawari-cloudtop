@@ -53,6 +53,17 @@ def key_of(run, lead, name):
     return f"{PREFIX}/{run}/{valid}-PT{lead:04d}H00M-{name}.nc"
 
 # ---- S3(公開バケット)----
+def s3req(method, url, **kw):
+    """2026-10-23 一覧・HEAD が S3 の一時的な Read timeout で落ちた(05:46Z の回)→ 4 回までやり直す"""
+    for attempt in range(4):
+        try:
+            r = requests.request(method, url, headers=UA, timeout=60, **kw)
+            if r.status_code >= 500: raise RuntimeError(f"HTTP {r.status_code}")
+            return r
+        except Exception as e:
+            if attempt == 3: raise
+            log(f"S3 {method} やり直し {attempt+1}: {e}"); time.sleep(5 + attempt*10)
+
 def list_runs(days=3):
     """新しい順の回の一覧(例 20261010T0000Z)。直近 days 日だけ"""
     after = f"{PREFIX}/{(dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) - dt.timedelta(days=days)).strftime('%Y%m%dT0000Z')}"
@@ -60,7 +71,7 @@ def list_runs(days=3):
     while True:
         q = {"list-type": "2", "delimiter": "/", "prefix": PREFIX + "/", "start-after": after}
         if token: q["continuation-token"] = token
-        r = requests.get(S3 + "/", params=q, headers=UA, timeout=60); r.raise_for_status()
+        r = s3req("GET", S3 + "/", params=q); r.raise_for_status()
         runs += re.findall(rf"<Prefix>{PREFIX}/(\d{{8}}T\d{{4}}Z)/</Prefix>", r.text)
         m = re.search(r"<NextContinuationToken>([^<]+)</NextContinuationToken>", r.text)
         if not m: break
@@ -68,7 +79,7 @@ def list_runs(days=3):
     return sorted(set(runs), reverse=True)
 
 def exists(key):
-    r = requests.head(f"{S3}/{key}", headers=UA, timeout=60)
+    r = s3req("HEAD", f"{S3}/{key}")
     return r.status_code == 200, int(r.headers.get("Content-Length") or 0)
 
 def run_ready(run):
