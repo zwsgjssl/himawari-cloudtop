@@ -1,0 +1,3 @@
+12:49:11 PIREP・AIREP(日本付近): 1 通
+12:49:12 nwp_obs/obs/20261024.json に 12Z を記録: ltg, rad, metar, sigmet, pirep, taf, irmin, ctop
+12:49:12 衛星画像 12:00Z はもうあります
