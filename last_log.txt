@@ -1,0 +1,4 @@
+21:46:29 PIREP・AIREP(日本付近): 0 通
+21:46:29 TAF: 新しい物 0 通(全体 21 通、項目 ['bulletinTime', 'dbPopTime', 'elev', 'fcsts', 'icaoId', 'issueTime', 'lat', 'lon', 'mostRecent', 'name', 'prior', 'rawTAF', 'remarks', 'validTimeFrom', 'validTimeTo'])
+21:46:30 nwp_obs/obs/20261031.json に 21Z を記録: ltg, rad, metar, sigmet, pirep, taf, irmin, ctop
+21:46:31 衛星画像 21:00Z はもうあります
