@@ -27,7 +27,7 @@
 #   (3) 図や資料が変わったかは、前の nwp-img の charts.json(--prev)と比べる
 # 環境変数: CF_API_TOKEN・CF_ACCOUNT_ID・CF_KV_WX_ID(himawari と同じ)、ANTHROPIC_API_KEY(任意)・ANTHROPIC_MODEL(任意、既定 claude-sonnet-5-5)
 #   試験用: NWP_BASE(図の置き場所の代わり)、ANTHROPIC_BASE、--dry-run フォルダ
-import argparse, base64, datetime as dt, email.utils, io, json, os, subprocess, sys, tempfile, time
+import argparse, base64, datetime as dt, email.utils, io, json, os, re, subprocess, sys, tempfile, time
 import requests
 
 BASE = os.environ.get("NWP_BASE", "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/").rstrip("/") + "/"
@@ -299,6 +299,12 @@ def ai_from_file(base):
             ok.append(q)
         if ok: marks[cid] = ok
     if marks: out["marks"] = marks
+    # 2026-11-05 ユーザー「断面図の揺れの表示で CAT としか書いてないのは何?」→ 240 字で切って、最後の(強さ)が消えていた(長い claim の c1・c6・c7・c21 など)。
+    #   上限を 600 字にし、それでも長いときは最後の(…)を残して真ん中を「…」で詰める(アプリは最後の括弧から強さを読む)
+    def clip_text(t, n=600):
+        if len(t) <= n: return t
+        m = re.search(r"[(（][^()（）]*[)）]\s*$", t); tail = m.group(0) if m and len(m.group(0)) < 80 else ""
+        return t[:n - len(tail) - 1] + "…" + tail
     # v237 Map の「SkAI の注意」: 範囲(box = [南, 北, 西, 東])・FL・時間つきの予想(claims)を Map の経路・断面図に重ねる。形を確かめて、おかしい物は捨てる
     CK = {"cat", "cb", "wind", "other", "front", "jet", "moist", "icing"}
     cl = []
@@ -308,7 +314,7 @@ def ai_from_file(base):
         if not (isinstance(box, list) and len(box) == 4 and all(num(v) is not None for v in box)): continue
         if fl is not None and not (isinstance(fl, list) and len(fl) == 2 and all(num(v) is not None for v in fl)): fl = None
         cl.append({"id": str(c.get("id") or "c" + str(len(cl) + 1))[:12], "kind": c.get("kind") if c.get("kind") in CK else "other",
-                   "text": str(c.get("text") or "")[:240], "box": [float(v) for v in box], "fl": [float(v) for v in fl] if fl else None,
+                   "text": clip_text(str(c.get("text") or "")), "box": [float(v) for v in box], "fl": [float(v) for v in fl] if fl else None,
                    "from": str(c.get("from") or "")[:20], "to": str(c.get("to") or "")[:20]})
     if cl: out["claims"] = cl
     return out
