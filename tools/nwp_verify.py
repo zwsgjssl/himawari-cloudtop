@@ -71,7 +71,7 @@ def load_ukmo(d):
     for f in sorted(glob.glob(os.path.join(d, "ukmo", "*.json"))):
         try: u = json.load(open(f, encoding="utf-8"))
         except Exception: continue
-        if u.get("t0") and u["t0"].get("t"): out.append((T(u["t0"]["t"]), u["t0"]))
+        if u.get("t0") and u["t0"].get("t"): out.append((T(u["t0"]["t"]), {**u["t0"], "_ri_fl": u.get("ri_fl") or []}))
     return out
 def pct(vals, q):
     v = sorted(vals); return v[min(len(v) - 1, int(len(v) * q))] if v else 0
@@ -97,6 +97,28 @@ def uk_box(c, recs):
         lines[-1] += f"(この時刻の上位 10% の目安: TI1 {th['ti90']}・シアー {th['vw90']})"
     return lines, hit
 
+# 2026-11-05 ユーザー「空振りが増えていくのは困る」→ CAT の「報告なし」を、UKMET 解析の層ごとの値(vwz・riz)で 2 つに分ける:
+#   根拠あり = claim の範囲・時間(±3 時間)・高さ(±1000ft)に シアー 6 以上かつ Ri 1 未満 の層がある / 空振りの疑い = どの層にも無い
+#   本人・他便の「揺れなし」(NIL・SMTH)が claim の中にあれば 空振り(はっきり)
+def uk_layers(c, recs):
+    f0, f1 = T(c["from"]), T(c["to"]); cs = set(cells(c["box"])); lo, hi = (c.get("fl") or [0, 600])[0], (c.get("fl") or [0, 600])[1]; best = None; seen = False
+    for t, r in recs:
+        if not (f0 - dt.timedelta(hours=3) <= t <= f1 + dt.timedelta(hours=3)): continue
+        RF = r.get("_ri_fl") or []
+        if not RF or not r.get("vwz"): continue
+        for k in cs:
+            vz, rz = (r.get("vwz") or {}).get(k), (r.get("riz") or {}).get(k)
+            if not vz or not rz: continue
+            for q in range(min(len(RF), len(vz), len(rz))):
+                if not (min(lo, hi) - 10 <= RF[q] <= max(lo, hi) + 10) or vz[q] is None or rz[q] is None: continue
+                seen = True
+                if vz[q] >= 6 and rz[q] < 1 and (best is None or (vz[q], -rz[q]) > (best[0], -best[1])): best = (vz[q], rz[q], RF[q], t)
+    return seen, best
+def area_nm2(b):
+    import math
+    return (b[1] - b[0]) * 60 * (b[3] - b[2]) * 60 * math.cos(math.radians((b[0] + b[1]) / 2))
+NEG = re.compile(r"^(NIL|SMTH|SMOOTH|NEG)$", re.I)
+
 def judge(c, obs, SG, PR, UK=()):
     f0, f1 = T(c["from"]), T(c["to"]); b = c["box"]; cs = set(cells(b))
     hrs = [(h, r) for h, r in obs if f0 < h <= f1 + dt.timedelta(hours=1)]
@@ -117,10 +139,24 @@ def judge(c, obs, SG, PR, UK=()):
     k = c.get("kind")
     if k == "cb":
         v = "当たり" if (ltg >= 1 or rmx >= 5 or irm <= 215) else "外れ(雷・強い雨・冷たい雲頂なし)"
+        if v == "当たり":   # 2026-11-05 箱が広ければ当たりやすい → 箱の升のうち、どこかの時刻に CB の印(雷・段階 5 以上・215K 以下)があった升の割合
+            act = set()
+            for h, r in hrs:
+                act |= {k for k, x in ((r.get("ltg") or {}).get("box") or {}).items() if k in cs and x >= 1}
+                act |= {k for k, x in ((r.get("rad") or {}).get("max") or {}).items() if k in cs and x >= 5}
+                act |= {k for k, x in ((r.get("irmin") or {}).get("box") or {}).items() if k in cs and x <= 215}
+            fr = len(act) / max(1, len(cs))
+            v = f"当たり(箱の升の {fr:.0%})" if fr >= 0.25 else f"当たり・箱が広すぎ(CB の印があったのは箱の升の {fr:.0%})"
     elif k == "cat":
         hit = any("TURB" in str(s.get("hazard", "")).upper() for s in sg) or any(SEV.search(str(p.get("tbInt1") or "")) for p in pr)
-        v = "当たり(SIGMET・PIREP)" if hit else "報告なし(当たり外れは決めない)"
-        if not hit and ul: v += "・UKMET 解析では " + ("根拠あり(シアーか TI1 が日本付近の上位 10%)" if uhit else "根拠が弱い(シアー・TI1 が日本付近の上位 10% に入らない)")
+        neg = [p for p in pr if NEG.match(str(p.get("tbInt1") or "").strip())]
+        if hit: v = "当たり(SIGMET・PIREP)"
+        elif neg: v = "空振り(本人・他便の揺れなし " + "・".join(sorted({f"FL{fl(p.get('fltLvl'))}" for p in neg})) + ")"
+        else:
+            seen, best = uk_layers(c, UK)
+            if not seen: v = "報告なし(UKMET の層の値も無く分からない)"
+            elif best: v = f"報告なし・UKMET 解析では根拠あり(FL{best[2]} シアー {best[0]}・Ri {best[1]}、{best[3]:%d日%HZ})"
+            else: v = "空振りの疑い(報告なし、UKMET 解析でもシアー 6 以上かつ Ri 1 未満の層が無い)"
     elif k == "icing":
         hit = any("ICE" in str(s.get("hazard", "")).upper() for s in sg) or any(SEV.search(str(p.get("icgInt1") or "")) for p in pr)
         v = "当たり(SIGMET・PIREP)" if hit else "報告なし(当たり外れは決めない)"
@@ -198,6 +234,7 @@ def main():
     ap.add_argument("--hours", type=int, default=48, help="何時間前の回まで")
     ap.add_argument("--json", default="")
     ap.add_argument("--pilot", default="nwp_ai/pilot_reports.json", help="ユーザー本人の揺れの報告")
+    ap.add_argument("--score", default="nwp_ai/score.json", help="回ごとの成績を貯める(空なら書かない)")
     a = ap.parse_args()
     obs = load_obs(a.obs); SG, PR = sigmets(obs), pireps(obs); UK = load_ukmo(a.obs)
     PP, REP = pilot(a.pilot); PR = PR + PP
@@ -216,11 +253,32 @@ def main():
             print(f"- {c.get('id')} {c.get('kind')} 「{c.get('text', '')[:80]}」 {c['from'][8:13]}〜{c['to'][8:13]} → **{v}**")
             for x in info: print(f"    - {x}")
             r["claims"].append({"id": c.get("id"), "kind": c.get("kind"), "verdict": v, "info": info})
+        # 2026-11-05 成績(当たり・外れ・空振り・分からない)と箱の広さ。空振りが増えていないかを回ごとに追う
+        sc = {"base": b, "n": {}, "area": {}}
+        for c in cl:
+            k = c.get("kind"); sc["area"][k] = round(sc["area"].get(k, 0) + area_nm2(c["box"]) / 1e4, 1)
+        for x in r["claims"]:
+            k, v = x["kind"], x["verdict"]
+            g = "当たり(広すぎ)" if "広すぎ" in v else "当たり" if v.startswith("当たり") else "外れ" if v.startswith("外れ") else "空振り" if v.startswith("空振り") else "根拠あり" if "根拠あり" in v else "分からない"
+            d = sc["n"].setdefault(k, {}); d[g] = d.get(g, 0) + 1
+        r["score"] = sc
+        print("- 成績: " + "、".join(f"{k} " + "・".join(f"{g} {n}" for g, n in d.items()) for k, d in sc["n"].items()) + " / 箱の広さ(万NM²): " + "・".join(f"{k} {v}" for k, v in sc["area"].items()))
         u = unforecast(cl, obs, SG, PR, T(b), min(now, T(b) + dt.timedelta(hours=24)), UK)
         if u:
             print("- 予想に無かった事:"); [print(f"    - {x}") for x in u[:30]]
         r["unforecast"] = u; res.append(r)
     if not res: print("\n確かめられる前の回がありません(nwp_ai/history に claims のある回が無い)")
+    if a.score:
+        try: S = json.load(open(a.score, encoding="utf-8")) if os.path.exists(a.score) else {}
+        except Exception: S = {}
+        for x in res:
+            if x.get("score"): S[x["base"]] = x["score"]   # 新しい観測で判定し直したら上書き
+        json.dump(dict(sorted(S.items())), open(a.score, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        print("\n## 成績の推移(新しい 10 回。空振り = 揺れなしの報告か UKMET 解析でも根拠なし、箱の広さ = 万NM²)")
+        for b in sorted(S)[-10:]:
+            x = S[b]; ct = x["n"].get("cat", {}); cb = x["n"].get("cb", {}); n = sum(ct.values())
+            print(f"- {b}: CAT {n} 個(当たり {ct.get('当たり', 0)}・根拠あり {ct.get('根拠あり', 0)}・空振り {ct.get('空振り', 0)}・分からない {ct.get('分からない', 0)})"
+                  f" 箱 {x['area'].get('cat', 0)} / CB {sum(cb.values())} 個(当たり {cb.get('当たり', 0)}・広すぎ {cb.get('当たり(広すぎ)', 0)}・外れ {cb.get('外れ', 0)}) 箱 {x['area'].get('cb', 0)}")
     # v208 本人の揺れの報告ごとに: どの回のどの CAT の予想に入っていたか、その時刻に近い UKMET(解析 t0 か 12 時間予想 f12)の値
     if REP:
         print("\n## Hiroki さん(787 の機長)本人の揺れの報告")
@@ -251,7 +309,7 @@ def main():
                       + (lambda av: f"・絶対渦度 最小 {min(x[0] for x in av)}×1e-5/s・マイナスの点 最大 {max(x[1] for x in av)}%(マイナス = 慣性不安定。亜熱帯の上層ではよくあるので、多さで見る)" if av else "")([u["avo"][x] for x in cs if x in u.get("avo", {})]))
                 # v208 区間の升ごとの風(報告の FL に近い高さ)。風向が区間の中でどう変わるか(水平の変わり方)を見る
                 if u.get("wind"):
-                    fls = [300, 340, 360, 390, 410]; li = min(range(len(fls)), key=lambda q: abs(fls[q] - (r.get("fl") or 380)))
+                    fls = [300, 340, 360, 390, 410]; rf = r.get("fl"); rf = (sum(rf) / len(rf) if isinstance(rf, list) and rf else rf) or 380; li = min(range(len(fls)), key=lambda q: abs(fls[q] - rf))
                     seq = []
                     for la, lo in seg[::max(1, len(seg) // 6)] + [seg[-1]]:
                         x = f"{int(la // 1)},{int(lo // 1)}"
