@@ -112,7 +112,7 @@ def uk_layers(c, recs):
             for q in range(min(len(RF), len(vz), len(rz))):
                 if not (min(lo, hi) - 10 <= RF[q] <= max(lo, hi) + 10) or vz[q] is None or rz[q] is None: continue
                 seen = True
-                if vz[q] >= 6 and rz[q] < 1 and (best is None or (vz[q], -rz[q]) > (best[0], -best[1])): best = (vz[q], rz[q], RF[q], t)
+                if vz[q] >= 9 and rz[q] < 0.5 and  (best is None or (vz[q], -rz[q]) > (best[0], -best[1])): best = (vz[q], rz[q], RF[q], t)   # 2026-11-08 段を上げた(9・0.5)
     return seen, best
 def area_nm2(b):
     import math
@@ -156,7 +156,7 @@ def judge(c, obs, SG, PR, UK=()):
             seen, best = uk_layers(c, UK)
             if not seen: v = "報告なし(UKMET の層の値も無く分からない)"
             elif best: v = f"報告なし・UKMET 解析では根拠あり(FL{best[2]} シアー {best[0]}・Ri {best[1]}、{best[3]:%d日%HZ})"
-            else: v = "空振りの疑い(報告なし、UKMET 解析でもシアー 6 以上かつ Ri 1 未満の層が無い)"
+            else: v = "空振りの疑い(報告なし、UKMET 解析でもシアー 9 以上かつ Ri 0.5 未満の層が無い)"
     elif k == "icing":
         hit = any("ICE" in str(s.get("hazard", "")).upper() for s in sg) or any(SEV.search(str(p.get("icgInt1") or "")) for p in pr)
         v = "当たり(SIGMET・PIREP)" if hit else "報告なし(当たり外れは決めない)"
