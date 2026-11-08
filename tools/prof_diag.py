@@ -11,7 +11,7 @@ for run, lead in (("20261108T0600Z", 3), ("20261108T0600Z", 6)):
     for k in ("T", "S", "D", "RH"):
         P[k] = os.path.join(w, k + ".nc"); ub.download(ub.key_of(run, lead, ub.FILES[k]), P[k])
     lat, lon, T, uT, _ = ub.cut(P["T"], True); _, _, S, _, _ = ub.cut(P["S"], True); _, _, D, _, _ = ub.cut(P["D"], True); _, _, RH, _, _ = ub.cut(P["RH"], True)
-    Tc = T - 273.15 if np.nanmean(T) > 150 else T; S = S * ub.KT
+    Tc = T - 273.15 if np.nanmean(T) > 150 else T; S = S * ub.KT; RH = RH * 100 if np.nanmax(RH) <= 1.5 else RH
     key = f"{run}+{lead}"; out[key] = {}
     for nm, (la, lo) in PTS.items():
         y = int(np.argmin(abs(lat - la))); x = int(np.argmin(abs(lon - lo)))
