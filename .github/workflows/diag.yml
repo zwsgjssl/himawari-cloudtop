@@ -1,0 +1,22 @@
+name: diag
+on:
+  push:
+    branches: [diag2]
+permissions:
+  contents: write
+jobs:
+  d:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with: { ref: main, path: main_repo }
+      - uses: actions/setup-python@v6
+        with: { python-version: "3.12" }
+      - run: pip install --quiet numpy xarray h5netcdf h5py requests pillow
+      - run: ln -s main_repo/tools main_tools && python3 -u tools/hshear_diag.py 2>&1 | tee out_log.txt
+      - run: |
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          mkdir -p out; cp out_log.txt out/log.txt
+          git checkout --orphan res && git rm -rfq --cached . && git add -f out && git commit -qm res && git push -f origin res:diag2-out
