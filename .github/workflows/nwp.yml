@@ -38,8 +38,9 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
-          pip install --quiet requests pillow numpy h5py satpy==0.60.0 pyresample==1.35.0   # v2 satpy = 衛星画像(tools/sat_build.py)
+          # 2026-11-12 Ubuntu のミラーの名前が引けず apt が 3 回続けて失敗 → pip を先に、apt は 3 回やり直して、だめでも先へ(PDF は pymupdf で描く)
+          pip install --quiet requests pillow numpy h5py pymupdf satpy==0.60.0 pyresample==1.35.0   # v2 satpy = 衛星画像(tools/sat_build.py)
+          for i in 1 2 3; do sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils && break; echo "apt やり直し $i"; sleep 20; done || true
       - name: Build and upload
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}

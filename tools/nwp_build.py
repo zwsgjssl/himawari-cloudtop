@@ -204,9 +204,15 @@ def render(pdf_bytes):
     """PDF → グレーの PNG(pdftoppm)。(png, 幅, 高さ)"""
     with tempfile.TemporaryDirectory() as tmp:
         p = os.path.join(tmp, "a.pdf"); open(p, "wb").write(pdf_bytes)
-        subprocess.run(["pdftoppm", "-r", str(DPI), "-gray", "-png", "-singlefile", p, os.path.join(tmp, "o")], check=True)
         from PIL import Image
-        im = Image.open(os.path.join(tmp, "o.png")).convert("L")
+        try:
+            subprocess.run(["pdftoppm", "-r", str(DPI), "-gray", "-png", "-singlefile", p, os.path.join(tmp, "o")], check=True)
+            im = Image.open(os.path.join(tmp, "o.png")).convert("L")
+        except (FileNotFoundError, subprocess.CalledProcessError) as e:   # 2026-11-12 apt で poppler が入らなかったとき
+            import pymupdf as fitz
+            log(f"pdftoppm が使えないので pymupdf で描く: {e}")
+            pg = fitz.open(p)[0]; pm = pg.get_pixmap(dpi=DPI, colorspace=fitz.csGRAY)
+            im = Image.frombytes("L", (pm.width, pm.height), pm.samples)
     # 16 段階の灰色(4 ビットの PNG)にして小さく(pdftoppm のままの半分くらい。線と字はそのまま読める)
     return gray4(im), im.width, im.height
 
