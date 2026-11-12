@@ -80,7 +80,7 @@ def main():
     log("回", ok); res = {"cases": [], "files": {}}
     for run in ok:
         res["files"][run] = names(run, 0); log("PT00 のファイル", res["files"][run])
-    cases = [(r, l) for r in ok for l in (0, 3, 6)][:5]
+    cases = [(r, l) for r in ok for l in (0, 3, 6, 9, 12)][:10]
     allA = {}; allH = {}
     for run, lead in cases:
         valid = dt.datetime.strptime(run, "%Y%m%dT%H%MZ") + dt.timedelta(hours=lead)
@@ -95,12 +95,12 @@ def main():
             if np.nanmax(RH) <= 1.5: RH = RH * 100
             R = rh_ice(RH, Tc)
             CA = None
-            try:
+            if False:
                 p = os.path.join(w, "CA.nc"); ub.download(ub.key_of(run, lead, "cloud_amount_on_height_levels"), p); la2, lo2, CAh, hh = cut_h(p)
                 p2 = os.path.join(w, "Z.nc"); ub.download(ub.key_of(run, lead, "geopotential_height_on_pressure_levels"), p2); _, _, Zp, _, _ = ub.cut(p2, True)
                 if CAh.shape[1:] == T.shape[1:]: CA = (CAh, hh, Zp)
                 else: log("格子が違う", CAh.shape, T.shape)
-            except Exception as e: log("雲量の面が読めない", repr(e)); CA = None
+
             hp = os.path.join(w, "h.nc"); hb.download(hk, hp); H, grid, src, _ = hb.build(hp)
         # ひまわり(0.05°)を UKMET の格子の点に: 近い 3x3 の雲のある画素の平均 FL と雲の割合
         Hf = np.where((H > 0) & (H < 255), H.astype("f4") * 2, np.nan); valid_h = H < 255
@@ -112,6 +112,11 @@ def main():
         meth = {}
         for tw, ti in ((95, 96.25),):
             meth[f"lev{tw}"] = top_level(R, Tc, tw, ti)[0]; meth[f"int{tw}"] = top_interp(R, Tc, tw, ti)
+        if CA is not None:
+            pass
+        T = {X: top_cum(R, Tc, X) for X in (25, 35, 40, 50, 60)}
+        for X in T: meth[f"cum{X}"] = T[X]
+        meth["c50f25"] = np.where(T[50] > 0, T[50], T[25]); meth["c40f25"] = np.where(T[40] > 0, T[40], T[25])
         if CA is not None:
             pass
         T = {X: top_cum(R, Tc, X) for X in (10, 25, 35, 50, 75, 100)}
