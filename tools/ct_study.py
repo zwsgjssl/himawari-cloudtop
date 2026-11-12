@@ -113,8 +113,12 @@ def main():
         for tw, ti in ((95, 96.25),):
             meth[f"lev{tw}"] = top_level(R, Tc, tw, ti)[0]; meth[f"int{tw}"] = top_interp(R, Tc, tw, ti)
         if CA is not None:
-            for fr in (0.3,): meth[f"ca{int(fr*100)}"] = ca_top(CA[0], CA[1], CA[2], fr)
-        for X in (10, 25, 50, 100): meth[f"cum{X}"] = top_cum(R, Tc, X)
+            pass
+        T = {X: top_cum(R, Tc, X) for X in (10, 25, 35, 50, 75, 100)}
+        for X in (25, 50): meth[f"cum{X}"] = T[X]
+        for name, (a, ha, b, hb2, c) in {"s1": (25, 300, 50, 200, 100), "s2": (25, 330, 50, 230, 75), "s3": (35, 300, 50, 220, 100), "s4": (25, 320, 50, 0, 50), "s5": (35, 330, 75, 0, 75)}.items():
+            t = np.where(T[a] >= ha, T[a], np.where(T[b] >= hb2, T[b], T[c]))
+            meth[name] = t; meth[name + "f"] = np.where(t > 0, t, T[10])   # f: 雲が薄くて足りないときは cum10
         hcl = good & (hfrac >= 0.5); hclr = good & (hfrac <= 0.1)
         case = {"run": run, "lead": lead, "hima": f"{ht:%H%MZ}", "n": int(good.sum()), "hima_cloudy": float(hcl.sum() / max(1, good.sum())), "m": {}}
         for k, ct in meth.items():
