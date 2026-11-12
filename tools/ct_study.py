@@ -92,7 +92,7 @@ def main():
     for run in ok:
         res["files"][run] = names(run, 0); log("PT00 のファイル", res["files"][run])
     cases = [(r, l) for r in ok for l in (0, 3, 6, 9)][:8]
-    allA = {}; allH = {}
+    allA = {}; allH = {}; allC = {}
     for run, lead in cases:
         valid = dt.datetime.strptime(run, "%Y%m%dT%H%MZ") + dt.timedelta(hours=lead)
         ht, hk = hima_at(valid)
@@ -128,6 +128,12 @@ def main():
             meth[f"lev{tw}"] = top_level(R, Tc, tw, ti)[0]; meth[f"int{tw}"] = top_interp(R, Tc, tw, ti)
         if CA is not None:
             pass
+        T = {X: top_cum(R, Tc, X) for X in (10, 15, 20, 25, 35, 50)}
+        for X in T: meth[f"cum{X}"] = T[X]
+        meth["c50f25"] = np.where(T[50] > 0, T[50], T[25]); meth["c35f15"] = np.where(T[35] > 0, T[35], T[15]); meth["c25f10"] = np.where(T[25] > 0, T[25], T[10])
+        for th in (0.3, 0.5): meth[f"lay{int(th*100)}"] = top_layers(R, Tc, HML[0], HML[1], HML[2], th)
+        if CA is not None:
+            pass
         T = {X: top_cum(R, Tc, X) for X in (25, 50)}
         meth["c50f25"] = np.where(T[50] > 0, T[50], T[25])
         for th in (0.2, 0.3, 0.5): meth[f"lay{int(th*100)}"] = top_layers(R, Tc, HML[0], HML[1], HML[2], th)
@@ -154,6 +160,9 @@ def main():
                             "bias": float(np.mean(d)) if d.size else None, "mae": float(np.mean(np.abs(d))) if d.size else None,
                             "w30": float(np.mean(np.abs(d) <= 30)) if d.size else None, "n": int(d.size)}
             allA.setdefault(k, []).append(d); allH.setdefault(k, []).append(hfl[both])
+            for nm, th in (("hi", 250), ("mid", 150)):
+                ho = good & (hfrac >= 0.5) & (np.nan_to_num(hfl) >= th); uo = good & (ct >= th); hn = good & ~ho
+                c = allC.setdefault((k, nm), [0, 0, 0]); c[0] += int((ho & uo).sum()); c[1] += int((ho & ~uo).sum()); c[2] += int((hn & uo).sum())
         res["cases"].append(case); log(json.dumps(case, ensure_ascii=False))
     summ = {}
     for k, ds in allA.items():
@@ -166,6 +175,8 @@ def main():
             m = (h >= a) & (h < a + 50)
             if m.sum() > 50: bins[a] = [round(float(np.mean(d[m])), 1), round(float(np.mean(np.abs(d[m]) <= 30)), 3), int(m.sum())]
         summ[k]["bins"] = bins
+    for (k, nm), (h, m_, f) in allC.items():
+        summ[k]["csi_" + nm] = round(h / max(1, h + m_ + f), 3); summ[k]["miss_" + nm] = round(m_ / max(1, h + m_), 3); summ[k]["false_" + nm] = round(f / max(1, h + f), 3)
     res["summary"] = summ; log("まとめ"); [log(k, json.dumps(v)) for k, v in summ.items()]
     os.makedirs("out", exist_ok=True); json.dump(res, open("out/ct_study.json", "w"), ensure_ascii=False, indent=1)
 if __name__ == "__main__": main()
