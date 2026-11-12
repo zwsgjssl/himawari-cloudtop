@@ -1,0 +1,43 @@
+name: UKMET global (R2)
+
+# 2026-11-12 国際線用: UKMET の全球を約 30km に間引き、15° 四方の区画にして Cloudflare R2(バケット skai-wx)に置く(tools/ukmo_global.py)。
+#  - 起動: 日本付近の UKMET(ukmo.yml)が成功したら続けて動く。手で動かすときは Actions → UKMET global (R2) → Run workflow。
+#  - R2 にもう同じ回があれば何もせずに終わる。
+#  - 自動ストップ: 今月の書き込みが 85 万回・保存が 8GB を超えそうなら書かずに失敗する(GitHub から失敗のメール)。Cloudflare の通知(70 万回・7GB)もある。
+# 必要な Secrets: R2_ACCESS_KEY_ID・R2_SECRET_ACCESS_KEY(skai-wx の読み書きだけの鍵)・CF_ACCOUNT_ID
+on:
+  workflow_run:
+    workflows: ["UKMET upper air"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "R2 にもう同じ回があっても作り直す"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ukmo-global
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install --quiet numpy xarray h5netcdf h5py requests boto3
+      - name: Build and upload
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: python3 -u tools/ukmo_global.py --r2 ${{ inputs.force && '--force' || '' }}
