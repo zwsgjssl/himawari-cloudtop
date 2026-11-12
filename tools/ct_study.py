@@ -75,12 +75,23 @@ def top_cum(R, Tc, X):
         pk = p[k] - dp[k] / 2 + f * dp[k]   # 層の上端(p 小)から下へ
         out = np.where(hit, 145366.45 * (1 - (pk / 1013.25) ** 0.190284) / 100, out); done |= hit; S = nS
     return out
+def top_band(R, Tc, pmin, pmax, cfmin=0.05):
+    """気圧 pmin〜pmax(hPa)の間で、上から見て最初に雲量 ≥ cfmin の面の FL(無ければ 0)"""
+    cf = cf_sund(R, Tc); p = np.array(ub.LEVELS_HPA); out = np.zeros(cf.shape[1:])
+    for k in range(len(p)):   # 下から上へ。上で見つかれば上書き
+        if pmin <= p[k] <= pmax: out = np.where(cf[k] >= cfmin, FL[k], out)
+    return out
+def top_layers(R, Tc, H, M, L_, th):
+    """UKMET 自身の 上層・中層・下層の雲量(2 次元)で層を決め、その層の中の湿度で高さを決める"""
+    hi = top_band(R, Tc, 100, 500); mi = top_band(R, Tc, 500, 800); lo = top_band(R, Tc, 800, 1000)
+    hi2 = np.where(hi > 0, hi, 300.0); mi2 = np.where(mi > 0, mi, 150.0); lo2 = np.where(lo > 0, lo, 50.0)
+    return np.where(H >= th, hi2, np.where(M >= th, mi2, np.where(L_ >= th, lo2, 0.0)))
 def main():
     runs = [r for r in ub.list_runs(2)][:6]; ok = [r for r in runs if ub.exists(ub.key_of(r, 6, ub.FILES["RH"]))[0]][:2]
     log("回", ok); res = {"cases": [], "files": {}}
     for run in ok:
         res["files"][run] = names(run, 0); log("PT00 のファイル", res["files"][run])
-    cases = [(r, l) for r in ok for l in (0, 3, 6, 9, 12)][:10]
+    cases = [(r, l) for r in ok for l in (0, 3, 6, 9)][:8]
     allA = {}; allH = {}
     for run, lead in cases:
         valid = dt.datetime.strptime(run, "%Y%m%dT%H%MZ") + dt.timedelta(hours=lead)
@@ -95,6 +106,9 @@ def main():
             if np.nanmax(RH) <= 1.5: RH = RH * 100
             R = rh_ice(RH, Tc)
             CA = None
+            HML = []
+            for nm in ("cloud_amount_of_high_cloud", "cloud_amount_of_medium_cloud", "cloud_amount_of_low_cloud"):
+                pp = os.path.join(w, nm); ub.download(ub.key_of(run, lead, nm), pp); _, _, a2, _, _ = ub.cut(pp, False); HML.append(a2 / 100 if np.nanmax(a2) > 1.5 else a2)
             if False:
                 p = os.path.join(w, "CA.nc"); ub.download(ub.key_of(run, lead, "cloud_amount_on_height_levels"), p); la2, lo2, CAh, hh = cut_h(p)
                 p2 = os.path.join(w, "Z.nc"); ub.download(ub.key_of(run, lead, "geopotential_height_on_pressure_levels"), p2); _, _, Zp, _, _ = ub.cut(p2, True)
@@ -112,6 +126,13 @@ def main():
         meth = {}
         for tw, ti in ((95, 96.25),):
             meth[f"lev{tw}"] = top_level(R, Tc, tw, ti)[0]; meth[f"int{tw}"] = top_interp(R, Tc, tw, ti)
+        if CA is not None:
+            pass
+        T = {X: top_cum(R, Tc, X) for X in (25, 50)}
+        meth["c50f25"] = np.where(T[50] > 0, T[50], T[25])
+        for th in (0.2, 0.3, 0.5): meth[f"lay{int(th*100)}"] = top_layers(R, Tc, HML[0], HML[1], HML[2], th)
+        # 上層の雲量が多ければ上の湿度の頂、少なければ cum の作り方
+        for th in (0.3, 0.5): meth[f"hyb{int(th*100)}"] = np.where(HML[0] >= th, np.where(top_band(R, Tc, 100, 500) > 0, top_band(R, Tc, 100, 500), meth["c50f25"]), np.where(T[50] > 0, np.minimum(T[50], np.where(HML[0] >= 0.1, 999, 250)), T[25]))
         if CA is not None:
             pass
         T = {X: top_cum(R, Tc, X) for X in (25, 35, 40, 50, 60)}
