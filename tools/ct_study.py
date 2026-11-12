@@ -82,8 +82,8 @@ def main():
             R = rh_ice(RH, Tc)
             CA = None
             try:
-                p = os.path.join(w, "CA.nc"); ub.download(ub.key_of(run, lead, "cloud_amount_on_height_levels.nc"), p); la2, lo2, CAh, hh = cut_h(p)
-                p2 = os.path.join(w, "Z.nc"); ub.download(ub.key_of(run, lead, "geopotential_height_on_pressure_levels.nc"), p2); _, _, Zp, _, _ = ub.cut(p2, True)
+                p = os.path.join(w, "CA.nc"); ub.download(ub.key_of(run, lead, "cloud_amount_on_height_levels"), p); la2, lo2, CAh, hh = cut_h(p)
+                p2 = os.path.join(w, "Z.nc"); ub.download(ub.key_of(run, lead, "geopotential_height_on_pressure_levels"), p2); _, _, Zp, _, _ = ub.cut(p2, True)
                 if CAh.shape[1:] == T.shape[1:]: CA = (CAh, hh, Zp)
                 else: log("格子が違う", CAh.shape, T.shape)
             except Exception as e: log("雲量の面が読めない", repr(e)); CA = None
