@@ -48,6 +48,7 @@ PR_FILES = ("precipitation_rate", "rainfall_rate_from_convection")
 def pr_mmh(a, units):
     """kg m-2 s-1(= mm/s)なら mm/h に。mm/h ならそのまま"""
     u = (units or "").lower().replace(" ", "")
+    if u in ("ms-1", "m/s", "ms^-1"): return a * 3.6e6   # 水の深さ m/s(Met Office の precipitation_rate は m s-1)
     return a * 3600.0 if ("s-1" in u or "/s" in u or "s^-1" in u) else a
 KT = 1.0 / 0.514444
 TTL = 48 * 3600
