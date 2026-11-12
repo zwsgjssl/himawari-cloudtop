@@ -32,6 +32,35 @@ def top_interp(R, Tc, thr_w, thr_i):   # 上の面との間でしきい値を横
 def cf_amount_top(CA, frac):
     cl = CA >= frac; L = CA.shape[0]; idx = L - 1 - np.argmax(cl[::-1], axis=0); has = cl.any(axis=0)
     return idx, has
+def cut_h(path):
+    """cloud_amount_on_height_levels → (lat, lon, CA[H,ny,nx] 0〜1, 高さ m)"""
+    import xarray as xr
+    with xr.open_dataset(path, engine="h5netcdf", decode_times=False) as ds:
+        name = ub.main_var(ds); da = ds[name]
+        la, lo = ub.dim_like(da, ["lat"]), ub.dim_like(da, ["lon"]); hz = [d for d in da.dims if d not in (la, lo) and da.sizes[d] > 1][0]
+        for d in da.dims:
+            if d not in (la, lo, hz) and da.sizes[d] == 1: da = da.isel({d: 0})
+        lat = np.asarray(ds[la].values, dtype="f8"); lon = np.asarray(ds[lo].values, dtype="f8"); lon = np.where(lon > 180, lon - 360, lon)
+        yi = np.where((lat >= ub.LAT0 - 1e-6) & (lat <= ub.LAT1 + 1e-6))[0]; xi = np.where((lon >= ub.LON0 - 1e-6) & (lon <= ub.LON1 + 1e-6))[0]; xi = xi[np.argsort(lon[xi])]
+        h = np.asarray(ds[hz].values, dtype="f8") if hz in ds else np.arange(da.sizes[hz])
+        arr = da.isel({la: yi, lo: xi}).transpose(hz, la, lo).values.astype("f4")
+        log("高さの面", hz, list(np.round(h).astype(int)), "単位", ds[hz].attrs.get("units", "") if hz in ds else "", "値", float(np.nanmin(arr)), float(np.nanmax(arr)))
+        la_s = lat[yi]; order = np.argsort(la_s)
+    if np.nanmax(arr) > 1.5: arr = arr / 100
+    return la_s[order], lon[xi], arr[:, order, :], h
+def ca_top(CA, h, Z, frac):
+    """雲量の面で、上から見て最初に雲量 ≥ frac の高さ(上の面との間で直線)→ 気圧(ジオポテンシャル高度で)→ FL"""
+    cl = CA >= frac; Hn = CA.shape[0]; idx = Hn - 1 - np.argmax(cl[::-1], axis=0); has = cl.any(axis=0)
+    up = np.minimum(idx + 1, Hn - 1); yy, xx = np.indices(idx.shape); c0, c1 = CA[idx, yy, xx], CA[up, yy, xx]
+    f = np.where(up > idx, np.clip((c0 - frac) / np.maximum(1e-3, c0 - c1), 0, 1), 0); zt = h[idx] + f * (h[up] - h[idx])
+    # Z[L,ny,nx] = 気圧面の高さ(m)。zt を挟む面で log p を直線
+    lp = np.log(np.array(ub.LEVELS_HPA, dtype="f8")); fl = np.zeros(zt.shape)
+    for L in range(len(ub.LEVELS_HPA) - 1):
+        a, b = Z[L], Z[L + 1]; m = (zt >= a) & (zt < b)
+        w = (zt - a) / np.maximum(1e-3, b - a); p = np.exp(lp[L] + w * (lp[L + 1] - lp[L]))
+        fl = np.where(m, 145366.45 * (1 - (p / 1013.25) ** 0.190284) / 100, fl)
+    fl = np.where(zt < Z[0], zt * 3.28084 / 100, fl); fl = np.where(zt >= Z[-1], FL[-1], fl)
+    return np.where(has, fl, 0.0)
 def main():
     runs = [r for r in ub.list_runs(2)][:6]; ok = [r for r in runs if ub.exists(ub.key_of(r, 6, ub.FILES["RH"]))[0]][:2]
     log("回", ok); res = {"cases": [], "files": {}}
@@ -52,25 +81,27 @@ def main():
             if np.nanmax(RH) <= 1.5: RH = RH * 100
             R = rh_ice(RH, Tc)
             CA = None
-            fn = [f for f in res["files"].get(run, []) if re.search(r"cloud_amount_on_pressure_levels|cloud_volume_fraction_on_pressure", f)]
-            if fn:
-                p = os.path.join(w, "CA.nc"); ub.download(ub.key_of(run, lead, fn[0][:-3] if fn[0].endswith(".nc") else fn[0]), p)
-                try: _, _, CA, _, _ = ub.cut(p, True); CA = CA / 100 if np.nanmax(CA) > 1.5 else CA
-                except Exception as e: log("雲量の面が読めない", e); CA = None
+            try:
+                p = os.path.join(w, "CA.nc"); ub.download(ub.key_of(run, lead, "cloud_amount_on_height_levels.nc"), p); la2, lo2, CAh, hh = cut_h(p)
+                p2 = os.path.join(w, "Z.nc"); ub.download(ub.key_of(run, lead, "geopotential_height_on_pressure_levels.nc"), p2); _, _, Zp, _, _ = ub.cut(p2, True)
+                if CAh.shape[1:] == T.shape[1:]: CA = (CAh, hh, Zp)
+                else: log("格子が違う", CAh.shape, T.shape)
+            except Exception as e: log("雲量の面が読めない", repr(e)); CA = None
             hp = os.path.join(w, "h.nc"); hb.download(hk, hp); H, grid, src, _ = hb.build(hp)
         # ひまわり(0.05°)を UKMET の格子の点に: 近い 3x3 の雲のある画素の平均 FL と雲の割合
         Hf = np.where((H > 0) & (H < 255), H.astype("f4") * 2, np.nan); valid_h = H < 255
         iy = np.clip(np.rint((lat - grid["lat0"]) / grid["dlat"]).astype(int), 1, grid["ny"] - 2); ix = np.clip(np.rint((lon - grid["lon0"]) / grid["dlon"]).astype(int), 1, grid["nx"] - 2)
         IY, IX = np.meshgrid(iy, ix, indexing="ij")
         st = np.stack([Hf[IY + a, IX + b] for a in (-1, 0, 1) for b in (-1, 0, 1)]); vv = np.stack([valid_h[IY + a, IX + b] for a in (-1, 0, 1) for b in (-1, 0, 1)])
-        hfrac = np.sum(np.isfinite(st), 0) / np.maximum(1, np.sum(vv, 0)); hfl = np.nanmax(st, 0)
+        hfrac = np.sum(np.isfinite(st), 0) / np.maximum(1, np.sum(vv, 0)); hfl = np.nanmedian(st, 0)
         good = np.sum(vv, 0) >= 7
         meth = {}
-        for tw, ti in ((95, 96.25), (90, 92.5), (85, 88.75), (80, 85), (75, 81.25), (70, 77.5)):
+        for tw, ti in ((95, 96.25), (90, 92.5)):
             meth[f"lev{tw}"] = top_level(R, Tc, tw, ti)[0]; meth[f"int{tw}"] = top_interp(R, Tc, tw, ti)
         if CA is not None:
-            for fr in (0.1, 0.3, 0.5):
-                idx, has = cf_amount_top(CA, fr); meth[f"ca{int(fr*100)}"] = np.where(has, FL[idx], 0.0)
+            for fr in (0.05, 0.1, 0.2, 0.3, 0.5): meth[f"ca{int(fr*100)}"] = ca_top(CA[0], CA[1], CA[2], fr)
+        for tw, ti in ((98, 99), (100, 100), (102, 102), (105, 105)):
+            meth[f"lev{tw}"] = top_level(R, Tc, tw, ti)[0]
         hcl = good & (hfrac >= 0.5); hclr = good & (hfrac <= 0.1)
         case = {"run": run, "lead": lead, "hima": f"{ht:%H%MZ}", "n": int(good.sum()), "hima_cloudy": float(hcl.sum() / max(1, good.sum())), "m": {}}
         for k, ct in meth.items():
