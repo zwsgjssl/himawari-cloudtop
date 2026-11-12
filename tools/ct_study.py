@@ -61,13 +61,27 @@ def ca_top(CA, h, Z, frac):
         fl = np.where(m, 145366.45 * (1 - (p / 1013.25) ** 0.190284) / 100, fl)
     fl = np.where(zt < Z[0], zt * 3.28084 / 100, fl); fl = np.where(zt >= Z[-1], FL[-1], fl)
     return np.where(has, fl, 0.0)
+def cf_sund(R, Tc):
+    r = np.where(R == 255, 0, R) / 100.0; c = np.where(Tc < -20, 0.85, 0.8)
+    return np.where(r <= c, 0, np.where(r >= 1, 1, 1 - np.sqrt(np.clip((1 - r) / (1 - c), 0, 1))))
+def top_cum(R, Tc, X):
+    """上から雲量 × 層の厚さ(hPa)を足していき、X hPa 分になった高さ(衛星は薄い雲の中まで見通すので、少し下)"""
+    cf = cf_sund(R, Tc); p = np.array(ub.LEVELS_HPA, dtype="f8"); L = len(p)
+    dp = np.empty(L); dp[1:-1] = (p[:-2] - p[2:]) / 2; dp[0] = (p[0] - p[1]) / 2; dp[-1] = (p[-2] - p[-1]) / 2
+    S = np.zeros(cf.shape[1:]); out = np.zeros(cf.shape[1:]); done = np.zeros(cf.shape[1:], bool)
+    for k in range(L - 1, -1, -1):
+        add = cf[k] * dp[k]; nS = S + add; hit = (~done) & (nS >= X)
+        f = np.where(add > 0, (X - S) / np.maximum(1e-6, add), 0)   # 面 k の上半分から下へ
+        pk = p[k] - dp[k] / 2 + f * dp[k]   # 層の上端(p 小)から下へ
+        out = np.where(hit, 145366.45 * (1 - (pk / 1013.25) ** 0.190284) / 100, out); done |= hit; S = nS
+    return out
 def main():
     runs = [r for r in ub.list_runs(2)][:6]; ok = [r for r in runs if ub.exists(ub.key_of(r, 6, ub.FILES["RH"]))[0]][:2]
     log("回", ok); res = {"cases": [], "files": {}}
     for run in ok:
         res["files"][run] = names(run, 0); log("PT00 のファイル", res["files"][run])
     cases = [(r, l) for r in ok for l in (0, 3, 6)][:5]
-    allA = {}
+    allA = {}; allH = {}
     for run, lead in cases:
         valid = dt.datetime.strptime(run, "%Y%m%dT%H%MZ") + dt.timedelta(hours=lead)
         ht, hk = hima_at(valid)
@@ -96,12 +110,11 @@ def main():
         hfrac = np.sum(np.isfinite(st), 0) / np.maximum(1, np.sum(vv, 0)); hfl = np.nanmedian(st, 0)
         good = np.sum(vv, 0) >= 7
         meth = {}
-        for tw, ti in ((95, 96.25), (90, 92.5)):
+        for tw, ti in ((95, 96.25),):
             meth[f"lev{tw}"] = top_level(R, Tc, tw, ti)[0]; meth[f"int{tw}"] = top_interp(R, Tc, tw, ti)
         if CA is not None:
-            for fr in (0.05, 0.1, 0.2, 0.3, 0.5): meth[f"ca{int(fr*100)}"] = ca_top(CA[0], CA[1], CA[2], fr)
-        for tw, ti in ((98, 99), (100, 100), (102, 102), (105, 105)):
-            meth[f"lev{tw}"] = top_level(R, Tc, tw, ti)[0]
+            for fr in (0.3,): meth[f"ca{int(fr*100)}"] = ca_top(CA[0], CA[1], CA[2], fr)
+        for X in (10, 25, 50, 100): meth[f"cum{X}"] = top_cum(R, Tc, X)
         hcl = good & (hfrac >= 0.5); hclr = good & (hfrac <= 0.1)
         case = {"run": run, "lead": lead, "hima": f"{ht:%H%MZ}", "n": int(good.sum()), "hima_cloudy": float(hcl.sum() / max(1, good.sum())), "m": {}}
         for k, ct in meth.items():
@@ -110,13 +123,19 @@ def main():
             case["m"][k] = {"pod": float((hcl & uc).sum() / max(1, hcl.sum())), "far": float((hclr & uc).sum() / max(1, (good & uc).sum())),
                             "bias": float(np.mean(d)) if d.size else None, "mae": float(np.mean(np.abs(d))) if d.size else None,
                             "w30": float(np.mean(np.abs(d) <= 30)) if d.size else None, "n": int(d.size)}
-            allA.setdefault(k, []).append(d)
+            allA.setdefault(k, []).append(d); allH.setdefault(k, []).append(hfl[both])
         res["cases"].append(case); log(json.dumps(case, ensure_ascii=False))
     summ = {}
     for k, ds in allA.items():
         d = np.concatenate(ds) if ds else np.array([])
         summ[k] = {"bias": float(np.mean(d)) if d.size else None, "mae": float(np.mean(np.abs(d))) if d.size else None, "w30": float(np.mean(np.abs(d) <= 30)) if d.size else None,
                    "pod": float(np.mean([c["m"][k]["pod"] for c in res["cases"] if k in c["m"]])), "far": float(np.mean([c["m"][k]["far"] for c in res["cases"] if k in c["m"]]))}
+    for k in allA:
+        d = np.concatenate(allA[k]); h = np.concatenate(allH[k]); bins = {}
+        for a in range(100, 450, 50):
+            m = (h >= a) & (h < a + 50)
+            if m.sum() > 50: bins[a] = [round(float(np.mean(d[m])), 1), round(float(np.mean(np.abs(d[m]) <= 30)), 3), int(m.sum())]
+        summ[k]["bins"] = bins
     res["summary"] = summ; log("まとめ"); [log(k, json.dumps(v)) for k, v in summ.items()]
     os.makedirs("out", exist_ok=True); json.dump(res, open("out/ct_study.json", "w"), ensure_ascii=False, indent=1)
 if __name__ == "__main__": main()
