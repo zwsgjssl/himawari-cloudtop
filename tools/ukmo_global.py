@@ -46,15 +46,19 @@ def build(run, lead, work):
     lat, lon, T, uT = read(P["T"], True); _, _, S, uS = read(P["S"], True); _, _, D, _ = read(P["D"], True)
     _, _, TP, _ = read(P["TP"], False); _, _, RH, _ = read(P["RH"], True)
     for p in P.values(): os.remove(p)
+    try:   # 2026-11-12 CAPE(ukmo_build.CAPE_FILE)。無ければ欠け
+        pc = os.path.join(work, "CAPE.nc"); ub.download(ub.key_of(run, lead, ub.CAPE_FILE), pc); _, _, CAPE, _ = read(pc, False); os.remove(pc)
+    except Exception as e:
+        ub.log(f"PT{lead:02d} CAPE は取れませんでした: {e}"); CAPE = np.full(TP.shape, np.nan)
     Tc = T - 273.15 if np.nanmean(T) > 150 else T
     Skt = S * ub.KT if uS.strip().lower() not in ("kt", "knots", "knot") else S
     rad = np.deg2rad(D); U, V = -Skt*np.sin(rad), -Skt*np.cos(rad)
     TPh = TP / 100 if np.nanmax(TP) > 2000 else TP
     rhb = np.frombuffer(ub.rh_bytes(RH, Tc, lead)[0], dtype="u1").reshape(RH.shape)
     ub.log(f"PT{lead:02d} 取得 {t1-t0:.0f}秒・読み {time.time()-t1:.0f}秒 格子 {len(lat)}x{len(lon)} 緯度 {lat[0]:.2f}〜{lat[-1]:.2f} 経度 {lon[0]:.2f}〜{lon[-1]:.2f}")
-    return lat, lon, Tc, U, V, TPh, rhb
+    return lat, lon, Tc, U, V, TPh, rhb, CAPE
 
-def tiles(lat, lon, Tc, U, V, TPh, rhb):
+def tiles(lat, lon, Tc, U, V, TPh, rhb, CAPE):
     out = {}
     for la0 in range(-90, 90, TILE):
         yi = np.where((lat >= la0) & (lat < la0 + TILE if la0 + TILE < 90 else lat <= 90))[0]
@@ -64,7 +68,7 @@ def tiles(lat, lon, Tc, U, V, TPh, rhb):
             sl = (slice(yi[0], yi[-1] + 1), slice(xi[0], xi[-1] + 1)); L = Tc.shape[0]; ny, nx = len(yi), len(xi)
             body = np.empty((L, 3, ny, nx), dtype="<i2")
             body[:, 0], body[:, 1], body[:, 2] = ub.q16(Tc[:, sl[0], sl[1]], 10), ub.q16(U[:, sl[0], sl[1]], 10), ub.q16(V[:, sl[0], sl[1]], 10)
-            buf = body.tobytes() + ub.q16(TPh[sl[0], sl[1]], 10).tobytes()
+            buf = body.tobytes() + ub.q16(TPh[sl[0], sl[1]], 10).tobytes() + ub.q16(np.clip(CAPE[sl[0], sl[1]], 0, 30000), 1).tobytes()
             out[f"{la0}_{lo0}"] = (ub.off_bytes(buf, rhb[:, sl[0], sl[1]].tobytes(), nx),
                                    {"y0": int(yi[0]), "ny": ny, "x0": int(xi[0]), "nx": nx})
     return out
