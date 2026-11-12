@@ -43,6 +43,12 @@ NODATA = -32768
 # 2026-11-12 ユーザー「雷の指標も追加したい」→ CAPE(下層 500hPa までで一番持ち上がりやすい空気、J/kg)を圏界面の後ろに 1 面足す(値そのまま、int16)。
 #   無い回は全部 NODATA。FILES には入れない(run_ready で待たない)。Map は面の数で有るかを見る
 CAPE_FILE = "CAPE_most_unstable_below_500hPa"
+# 2026-11-12 ユーザー「降水予想も」→ CAPE の後ろに 降水の強さ・そのうち対流性の雨 の 2 面(mm/h ×10、int16)。無い回は NODATA
+PR_FILES = ("precipitation_rate", "rainfall_rate_from_convection")
+def pr_mmh(a, units):
+    """kg m-2 s-1(= mm/s)なら mm/h に。mm/h ならそのまま"""
+    u = (units or "").lower().replace(" ", "")
+    return a * 3600.0 if ("s-1" in u or "/s" in u or "s^-1" in u) else a
 KT = 1.0 / 0.514444
 TTL = 48 * 3600
 UA = {"User-Agent": "approach-planner-wx/1.0 (personal, non-commercial)"}
@@ -343,6 +349,14 @@ def build_slice(run, lead, work):
         log(f"  PT{lead:02d} CAPE 最大 {np.nanmax(CAPE):.0f} J/kg・99% {np.nanpercentile(CAPE, 99):.0f}")
     except Exception as e:
         log(f"  PT{lead:02d} CAPE は取れませんでした(この時刻は無しで): {e}"); CAPE = np.full(TP.shape, np.nan)
+    PRS = []
+    for nm in PR_FILES:
+        try:
+            pp = os.path.join(work, nm + ".nc"); download(key_of(run, lead, nm), pp); la7, _, a7, u7, _ = cut(pp, False); os.remove(pp)
+            if la7.shape != lat.shape or np.max(np.abs(la7 - lat)) > 1e-6: raise RuntimeError("格子が違います")
+            a7 = pr_mmh(a7, u7); log(f"  PT{lead:02d} {nm}({u7}) 最大 {np.nanmax(a7):.1f} mm/h・1mm/h 以上 {np.mean(a7 >= 1)*100:.1f}%"); PRS.append(a7)
+        except Exception as e:
+            log(f"  PT{lead:02d} {nm} は取れませんでした: {e}"); PRS.append(np.full(TP.shape, np.nan))
     Tc = T - 273.15 if (uT.strip() in ("K", "kelvin") or np.nanmean(T) > 150) else T
     Skt = S * KT if uS.strip().lower() not in ("kt", "knots", "knot") else S
     rad = np.deg2rad(D)
@@ -351,7 +365,7 @@ def build_slice(run, lead, work):
     L, ny, nx = T.shape
     body = np.empty((L, 3, ny, nx), dtype="<i2")
     body[:, 0], body[:, 1], body[:, 2] = q16(Tc, 10), q16(U, 10), q16(V, 10)
-    buf = body.tobytes() + q16(TPh, 10).tobytes() + q16(np.clip(CAPE, 0, 30000), 1).tobytes()
+    buf = body.tobytes() + q16(TPh, 10).tobytes() + q16(np.clip(CAPE, 0, 30000), 1).tobytes() + b"".join(q16(np.clip(a, 0, 3000), 10).tobytes() for a in PRS)
     rhb, rh_mode = rh_bytes(RH, Tc, lead)
     ctb = cloud_top(rhb, Tc)
     dlat_, dlon_ = (lat[-1] - lat[0]) / (ny - 1), (lon[-1] - lon[0]) / (nx - 1)

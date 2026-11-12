@@ -50,15 +50,21 @@ def build(run, lead, work):
         pc = os.path.join(work, "CAPE.nc"); ub.download(ub.key_of(run, lead, ub.CAPE_FILE), pc); _, _, CAPE, _ = read(pc, False); os.remove(pc)
     except Exception as e:
         ub.log(f"PT{lead:02d} CAPE は取れませんでした: {e}"); CAPE = np.full(TP.shape, np.nan)
+    PRS = []
+    for nm in ub.PR_FILES:   # 2026-11-12 降水の強さ・対流性の雨(mm/h)
+        try:
+            pp = os.path.join(work, nm + ".nc"); ub.download(ub.key_of(run, lead, nm), pp); _, _, a7, u7 = read(pp, False); os.remove(pp); PRS.append(ub.pr_mmh(a7, u7))
+        except Exception as e:
+            ub.log(f"PT{lead:02d} {nm} は取れませんでした: {e}"); PRS.append(np.full(TP.shape, np.nan))
     Tc = T - 273.15 if np.nanmean(T) > 150 else T
     Skt = S * ub.KT if uS.strip().lower() not in ("kt", "knots", "knot") else S
     rad = np.deg2rad(D); U, V = -Skt*np.sin(rad), -Skt*np.cos(rad)
     TPh = TP / 100 if np.nanmax(TP) > 2000 else TP
     rhb = np.frombuffer(ub.rh_bytes(RH, Tc, lead)[0], dtype="u1").reshape(RH.shape)
     ub.log(f"PT{lead:02d} 取得 {t1-t0:.0f}秒・読み {time.time()-t1:.0f}秒 格子 {len(lat)}x{len(lon)} 緯度 {lat[0]:.2f}〜{lat[-1]:.2f} 経度 {lon[0]:.2f}〜{lon[-1]:.2f}")
-    return lat, lon, Tc, U, V, TPh, rhb, CAPE
+    return lat, lon, Tc, U, V, TPh, rhb, CAPE, PRS
 
-def tiles(lat, lon, Tc, U, V, TPh, rhb, CAPE):
+def tiles(lat, lon, Tc, U, V, TPh, rhb, CAPE, PRS):
     out = {}
     for la0 in range(-90, 90, TILE):
         yi = np.where((lat >= la0) & (lat < la0 + TILE if la0 + TILE < 90 else lat <= 90))[0]
@@ -68,7 +74,7 @@ def tiles(lat, lon, Tc, U, V, TPh, rhb, CAPE):
             sl = (slice(yi[0], yi[-1] + 1), slice(xi[0], xi[-1] + 1)); L = Tc.shape[0]; ny, nx = len(yi), len(xi)
             body = np.empty((L, 3, ny, nx), dtype="<i2")
             body[:, 0], body[:, 1], body[:, 2] = ub.q16(Tc[:, sl[0], sl[1]], 10), ub.q16(U[:, sl[0], sl[1]], 10), ub.q16(V[:, sl[0], sl[1]], 10)
-            buf = body.tobytes() + ub.q16(TPh[sl[0], sl[1]], 10).tobytes() + ub.q16(np.clip(CAPE[sl[0], sl[1]], 0, 30000), 1).tobytes()
+            buf = body.tobytes() + ub.q16(TPh[sl[0], sl[1]], 10).tobytes() + ub.q16(np.clip(CAPE[sl[0], sl[1]], 0, 30000), 1).tobytes() + b"".join(ub.q16(np.clip(a[sl[0], sl[1]], 0, 3000), 10).tobytes() for a in PRS)
             out[f"{la0}_{lo0}"] = (ub.off_bytes(buf, rhb[:, sl[0], sl[1]].tobytes(), nx),
                                    {"y0": int(yi[0]), "ny": ny, "x0": int(xi[0]), "nx": nx})
     return out
