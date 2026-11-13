@@ -44,7 +44,7 @@ NODATA = -32768
 #   無い回は全部 NODATA。FILES には入れない(run_ready で待たない)。Map は面の数で有るかを見る
 CAPE_FILE = "CAPE_most_unstable_below_500hPa"
 # 2026-11-12 ユーザー「降水予想も」→ CAPE の後ろに 降水の強さ・そのうち対流性の雨 の 2 面(mm/h ×10、int16)。無い回は NODATA
-PR_FILES = ("precipitation_rate", "rainfall_rate_from_convection")
+PR_FILES = ("precipitation_rate", "rainfall_rate_from_convection", "snowfall_rate_from_convection")   # 2026-11-13 対流性の雪も(冬の日本海側の雷雲)
 def pr_mmh(a, units):
     """kg m-2 s-1(= mm/s)なら mm/h に。mm/h ならそのまま"""
     u = (units or "").lower().replace(" ", "")
