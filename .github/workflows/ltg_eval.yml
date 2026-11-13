@@ -1,0 +1,24 @@
+name: Thunder forecast check
+# 雷予想の答え合わせ(UKMET と気象庁の雷)。3 時間ごと。結果はブランチ ltg-data の data/<日付>.jsonl(数日分たまったら Map の雷予想の決め方を選ぶ)
+on:
+  schedule:
+    - cron: "50 1,4,7,10,13,16,19,22 * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency: { group: ltg-eval, cancel-in-progress: false }
+jobs:
+  e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: { python-version: "3.12" }
+      - run: pip install --quiet numpy xarray h5netcdf h5py requests
+      - run: python3 -u tools/ltg_eval.py
+      - run: |
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          d=$(date -u +%Y%m%d); cp out/line.json /tmp/line.json
+          git fetch -q origin ltg-data && git checkout -q -B ltg-data origin/ltg-data || (git checkout -q --orphan ltg-data && git rm -rfq --cached . && rm -rf tools .github *.md 2>/dev/null; true)
+          mkdir -p data; cat /tmp/line.json >> data/$d.jsonl; git add data; git commit -qm "ltg $d" && git push -q origin ltg-data
