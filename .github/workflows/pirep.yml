@@ -1,0 +1,32 @@
+name: PIREP collect
+# 公開の PIREP / AIREP(aviationweather.gov)を集める。6 時間ごと。結果はブランチ pirep-data の data/<年月>.jsonl(CAT の指標の答え合わせ用)
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+  # schedule が動かないことがあるので、毎時の「JMA NWP charts」のあとにも起こし、UTC 0・6・12・18 時台以外はすぐ終える
+  workflow_run:
+    workflows: ["JMA NWP charts"]
+    types: [completed]
+permissions:
+  contents: write
+concurrency: { group: pirep, cancel-in-progress: false }
+jobs:
+  c:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - id: due
+        run: |
+          h=$(date -u +%H); h=$((10#$h))
+          if [ "${{ github.event_name }}" = "workflow_run" ] && [ $(( h % 6 )) -ne 0 ]; then echo "go=0" >> $GITHUB_OUTPUT; else echo "go=1" >> $GITHUB_OUTPUT; fi
+      - if: steps.due.outputs.go == '1'
+        uses: actions/checkout@v5
+      - if: steps.due.outputs.go == '1'
+        run: |
+          pip install --quiet requests
+          cp tools/pirep_collect.py /tmp/pc.py
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git fetch -q origin pirep-data && git checkout -q -B pirep-data origin/pirep-data || (git checkout -q --orphan pirep-data && git rm -rfq --cached . && git clean -fdxq)
+          python3 -u /tmp/pc.py data
+          git add data; git commit -qm "pirep $(date -u +%Y%m%dT%H%MZ)" && git push -q origin pirep-data || echo "新しい報告なし"
