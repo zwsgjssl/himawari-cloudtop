@@ -35,7 +35,7 @@ def run_case(run, lead, w):
         tag = "← 揺れた" if fb > 210 and fa < 262 else ("← 滑らか" if fa < 305 and fb > 295 else "")
         mn = lambda F: np.nanmin(F[max(0, j-3):j+4, max(0, i-3):i+4])
         c = lambda F: f"{F[j,i]:6.2f}/{mn(F):5.2f}"
-        print(f"   FL{fa:03.0f}-{fb:03.0f}  {RHf[a,j,i]*100:3.0f}/{RHf[b,j,i]*100:3.0f}%  {lr:4.1f}  {np.sqrt(S2[j,i])*1.94384*304.8:5.1f}  {N2[j,i]*1e4:6.2f}  {N2m[j,i]*1e4:6.2f}  "
+        print(f"   FL{fa:03.0f}-{fb:03.0f}  {RHf[a,j,i]*100:3.0f}/{RHf[b,j,i]*100:3.0f}%  {lr[j,i]:4.1f}  {np.sqrt(S2[j,i])*1.94384*304.8:5.1f}  {N2[j,i]*1e4:6.2f}  {N2m[j,i]*1e4:6.2f}  "
               f"{c(Ri)}  {c(R9)}  {c(R95)}  {tag}")
         area.append((fa, fb, [100*(F[dom] < 1).mean() for F in (Ri, R9, R95)], [100*(F[dom] < .5).mean() for F in (Ri, R9, R95)]))
     print("   日本付近(30〜42N・128〜146E)で Ri<1 / Ri<0.5 の面積 % : 今の Ri, 湿りRi(90%), 湿りRi(95%)")
