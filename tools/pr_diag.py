@@ -1,9 +1,10 @@
-# 診断: 気象庁 bosai の nowc / jmatile にエコー頂高度のような要素があるか
-import json, requests
-UA = {"User-Agent": "skai-diag/1.0"}; B = "https://www.jma.go.jp/bosai/jmatile/data"
-for f in ("nowc/targetTimes_N1.json", "nowc/targetTimes_N2.json", "nowc/targetTimes_N3.json", "rasrf/targetTimes.json", "rasnow/targetTimes.json", "radar/targetTimes.json", "echotop/targetTimes.json", "hrpns/targetTimes.json"):
-    r = requests.get(f"{B}/{f}", headers=UA, timeout=30); print("==", f, r.status_code)
-    if r.ok:
-        try:
-            L = r.json(); els = sorted({x for e in L for x in e.get("elements", [])}); print("  件数", len(L), "要素", els)
-        except Exception as e: print("  ", r.text[:200])
+# 診断: 降水短時間予報の targetTimes の中身(immed / none の回と要素)を 10 分おきに 4 回見る
+import json, time, requests, collections
+UA = {"User-Agent": "skai-diag/1.0"}; B = "https://www.jma.go.jp/bosai/jmatile/data/rasrf/targetTimes.json"
+for k in range(4):
+    L = requests.get(B, headers=UA, timeout=30).json(); g = collections.defaultdict(list)
+    for e in L: g[(e["basetime"], e["member"])].append(e)
+    print("== 取得", time.strftime("%H:%M:%SZ", time.gmtime()), "件数", len(L))
+    for (b, m), a in sorted(g.items())[-8:]:
+        els = sorted({x for e in a for x in e["elements"]}); print("  ", b, m, len(a), min(e["validtime"] for e in a)[8:12], "→", max(e["validtime"] for e in a)[8:12], els)
+    if k < 3: time.sleep(600)
