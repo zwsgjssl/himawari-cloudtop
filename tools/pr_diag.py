@@ -1,50 +1,42 @@
-# 診断: 湿りRi(雲の中だけ安定度を θe* の上下差で計算)と今の Ri を、2026-11-14 の GUSRO 付近で並べる。
-#   体験: 11Z ごろ FL210〜260 で LGT(LP 寄り)、FL300 は雲の中で滑らか。
-#   雲の中の判定は上下の両方の面で氷に対する湿度 ≥ 90% と ≥ 95% の 2 通り(氷の雲は昇華熱で θe*)。日本付近で Ri<1 の面積がどれだけ増えるか(出すぎないか)も見る
+# 診断: Ri の塗りのしきい値を 1/0.5/0.25 から 0.75/0.5/0.25 にしたら、2026-11-14 の羽田→福岡(直線)と日本付近でどう変わるか。
+#   体験: FL210〜260(GUSRO 付近)で LGT(LP 寄り)、FL300 に上がってからは福岡までほぼ揺れなし
 import os, sys, tempfile, numpy as np
 sys.path.insert(0, os.path.dirname(__file__)); import ukmo_build as ub
-LA, LO = 35.6624, 139.1370; G = 9.81
-P = np.array(ub.LEVELS_HPA, float)
+G = 9.81; P = np.array(ub.LEVELS_HPA, float)
+A0, B0 = (35.553, 139.781), (33.586, 130.451)   # 羽田・福岡
 def fl_of(p): return (1 - (p/1013.25)**0.190284)*145366.45/100
 def get(run, lead, name, w):
     p = os.path.join(w, "x.nc"); ub.download(ub.key_of(run, lead, name), p); return ub.cut(p, True)
-def esat(Tk): Tc = Tk - 273.15; return 6.112*np.exp(17.67*Tc/(Tc + 243.5))
-def esati(Tk): Tc = Tk - 273.15; return np.where(Tc < 0, 6.112*np.exp(22.46*Tc/(272.62 + Tc)), esat(Tk))
-def tez(Tk, p): rs = 0.622*esat(Tk)/(p - esat(Tk)); return Tk*(1000/p)**0.2857*np.exp(2.5e6*rs/(1004*Tk))
-def tezi(Tk, p):   # 氷の雲: 氷に対する飽和・昇華熱
-    e = esati(Tk); rs = 0.622*e/(p - e); L = np.where(Tk < 273.15, 2.834e6, 2.5e6); return Tk*(1000/p)**0.2857*np.exp(L*rs/(1004*Tk))
+TH_ = (1, .75, .5, .25)
 def run_case(run, lead, w):
     lat, lon, T, _, _ = get(run, lead, ub.FILES["T"], w); S, uS = get(run, lead, ub.FILES["S"], w)[2:4]; D = get(run, lead, ub.FILES["D"], w)[2]
-    RH = get(run, lead, ub.FILES["RH"], w)[2]
     TK = T if np.nanmean(T) > 150 else T + 273.15
     Sms = S/ub.KT if uS.strip().lower() in ("kt", "knots", "knot") else S
     rad = np.deg2rad(D); U, V = -Sms*np.sin(rad), -Sms*np.cos(rad)
-    RHf = RH/100 if np.nanmax(RH) > 2 else RH
-    TH = TK*(1000/P[:, None, None])**0.2857; THE = tezi(TK, P[:, None, None])
-    RHi = RHf*esat(TK)/esati(TK)   # 湿度は水に対する値として、氷に対する湿度に直す
-    j = int(np.argmin(abs(lat - LA))); i = int(np.argmin(abs(lon - LO)))
+    TH = TK*(1000/P[:, None, None])**0.2857
     dom = np.ix_((lat >= 30) & (lat <= 42), (lon >= 128) & (lon <= 146))
-    print(f"== {run} +{lead}h  GUSRO の格子 {lat[j]:.2f}N {lon[i]:.2f}E。真上 / 周り30km の最小 Ri")
-    print("   層           湿度(下/上)  減率   VWS     乾N²     湿N²    Ri    湿りRi(90%) 湿りRi(95%)   ※N² は x1e-4 /s²、VWS kt/1000ft")
-    area = []
+    n = 121; f = np.linspace(0, 1, n); la = A0[0] + (B0[0] - A0[0])*f; lo = A0[1] + (B0[1] - A0[1])*f
+    dist = 2*6371*np.arcsin(np.sqrt(np.sin(np.deg2rad(B0[0]-A0[0])/2)**2 + np.cos(np.deg2rad(A0[0]))*np.cos(np.deg2rad(B0[0]))*np.sin(np.deg2rad(B0[1]-A0[1])/2)**2))/1.852
+    jj = np.array([int(np.argmin(abs(lat - x))) for x in la]); ii = np.array([int(np.argmin(abs(lon - x))) for x in lo])
+    print(f"== {run} +{lead}h  直線 {dist:.0f}NM。塗られる長さ NM(Ri≦1 / ≦0.75 / ≦0.5 / ≦0.25)と、日本付近の面積 %、直線上の VWS 平均(塗られた所)")
     for k in range(len(P) - 1):
         a, b = k, k + 1
         if P[a] > 500 or P[b] < 200: continue
-        Tm = (TK[a] + TK[b])/2; dz = 29.2712*Tm*np.log(P[a]/P[b])
-        S2 = ((U[b] - U[a])**2 + (V[b] - V[a])**2)/dz**2; S2c = np.maximum(S2, 1e-10)
-        N2 = G*(TH[b] - TH[a])/((TH[a] + TH[b])/2*dz); N2m = G*(np.log(THE[b]) - np.log(THE[a]))/dz
-        Ri = N2/S2c; lr = (TK[a] - TK[b])/dz*1000
-        R9 = np.where((RHi[a] >= .9) & (RHi[b] >= .9), N2m/S2c, Ri); R95 = np.where((RHi[a] >= .95) & (RHi[b] >= .95), N2m/S2c, Ri)
-        fa, fb = fl_of(P[a]), fl_of(P[b])
-        tag = "← 揺れた" if fb > 210 and fa < 262 else ("← 滑らか" if fa < 305 and fb > 295 else "")
-        mn = lambda F: np.nanmin(F[max(0, j-3):j+4, max(0, i-3):i+4])
-        c = lambda F: f"{F[j,i]:6.2f}/{mn(F):5.2f}"
-        print(f"   FL{fa:03.0f}-{fb:03.0f}  {RHf[a,j,i]*100:3.0f}/{RHf[b,j,i]*100:3.0f}%(氷{RHi[a,j,i]*100:3.0f}/{RHi[b,j,i]*100:3.0f}) {TK[a,j,i]-273.15:4.0f}℃  {lr[j,i]:4.1f}  {np.sqrt(S2[j,i])*1.94384*304.8:5.1f}  {N2[j,i]*1e4:6.2f}  {N2m[j,i]*1e4:6.2f}  "
-              f"{c(Ri)}  {c(R9)}  {c(R95)}  {tag}")
-        area.append((fa, fb, [100*(F[dom] < 1).mean() for F in (Ri, R9, R95)], [100*(F[dom] < .5).mean() for F in (Ri, R9, R95)]))
-    print("   日本付近(30〜42N・128〜146E)で Ri<1 / Ri<0.5 の面積 % : 今の Ri, 湿りRi(90%), 湿りRi(95%)")
-    for fa, fb, x, y in area:
-        print(f"     FL{fa:03.0f}-{fb:03.0f}  <1: {x[0]:5.1f} {x[1]:5.1f} {x[2]:5.1f}   <0.5: {y[0]:5.1f} {y[1]:5.1f} {y[2]:5.1f}")
+        dz = 29.2712*(TK[a] + TK[b])/2*np.log(P[a]/P[b])
+        S2 = ((U[b] - U[a])**2 + (V[b] - V[a])**2)/dz**2; N2 = G*(TH[b] - TH[a])/((TH[a] + TH[b])/2*dz)
+        Ri = np.where(N2 <= 0, 0, N2/np.maximum(S2, 1e-10)); vws = np.sqrt(S2)*1.94384*304.8
+        r = Ri[jj, ii]; v = vws[jj, ii]
+        L = [dist*(r <= t).mean() for t in TH_]; Ar = [100*(Ri[dom] <= t).mean() for t in TH_]
+        vm = [np.mean(v[r <= t]) if (r <= t).any() else float("nan") for t in TH_]
+        seg = lambda t: ",".join(f"{dist*f[s]:.0f}-{dist*f[e]:.0f}" for s, e in runs(r <= t))
+        print(f"  FL{fl_of(P[a]):03.0f}-{fl_of(P[b]):03.0f}  直線 {L[0]:4.0f}/{L[1]:4.0f}/{L[2]:4.0f}/{L[3]:4.0f}NM  面積 {Ar[0]:4.1f}/{Ar[1]:4.1f}/{Ar[2]:4.1f}/{Ar[3]:4.1f}%  VWS {vm[0]:4.1f}/{vm[1]:4.1f}/{vm[2]:4.1f}  ≦0.75 の所 NM: {seg(.75)}")
+def runs(m):
+    out = []; s = None
+    for x, y in enumerate(m):
+        if y and s is None: s = x
+        if not y and s is not None: out.append((s, x - 1)); s = None
+    if s is not None: out.append((s, len(m) - 1))
+    return out
 with tempfile.TemporaryDirectory() as w:
     for run, lead in (("20261114T0600Z", 3), ("20261114T0600Z", 6)):
         try: run_case(run, lead, w)
