@@ -117,7 +117,7 @@ def obs_hima(kv):
 #   jet = FL300〜450 の最大風速(kt)と その FL、vws = FL250〜450 の上下の層の風の差(kt/1000ft)、ti1 = Ellrod TI1(×1e-7/s²、FL250〜450)。vws・ti1 は升の中の 90 パーセンタイルの、一番大きい層の値、
 #   trop = 圏界面の FL(升の平均)、fz = 0℃ の高さ(FL、升の平均)、ice = 湿度 85% 以上・気温 0〜−15℃ の層の FL [下, 上]
 #   T+0 は観測を取り込んだ直後の値なので、ジェット・シアー・圏界面の「実際に近い姿」として事後検証に使う(観測そのものではない)。T+12 は気象庁の予想と比べる 2 つ目のモデル
-UK_V = 7   # v2026-10-20 ユーザー「TI1 廃止で Ri とシアーでいい」→ 高さごとのシアー(vwz)とシアーの分布(vws_dist)を足した。 v2026-10-19 高さごとの TI1(tiz)・Ri(riz)を足した。  # v210 TI1 の分布(ti1_dist。Map のしきい値を決めるため)を足した。 v209 絶対渦度(慣性不安定)を足した。v208 風向・風向の変わり方・Ri を足した。 v208 風向・風向の変わり方・Ri を足した。 まとめ方を変えたら上げる(同じ回でも作り直す)
+UK_V = 8   # v2026-11-15 ユーザー「揺れやすい雲かどうかを天気図も含めて AI で総合的に判定」→ 雲の層(cld)・雲の中の湿った空気での安定度(msz)・CAPE(cape)・雨と対流性の割合(pr)を足した。 v7: v2026-10-20 ユーザー「TI1 廃止で Ri とシアーでいい」→ 高さごとのシアー(vwz)とシアーの分布(vws_dist)を足した。 v2026-10-19 高さごとの TI1(tiz)・Ri(riz)を足した。  # v210 TI1 の分布(ti1_dist。Map のしきい値を決めるため)を足した。 v209 絶対渦度(慣性不安定)を足した。v208 風向・風向の変わり方・Ri を足した。 v208 風向・風向の変わり方・Ri を足した。 まとめ方を変えたら上げる(同じ回でも作り直す)
 def p2fl(p): return (1 - (np.asarray(p, float) / 1013.25) ** 0.190263) * 145442.16 / 100
 def obs_ukmo(kv, d):
     import warnings; warnings.simplefilter("ignore", RuntimeWarning)   # 全部が欠けの升の nanmax
@@ -132,7 +132,7 @@ def obs_ukmo(kv, d):
     g, lv = m["grid"], np.array(m["lv"], float); ny, nx, L = g["ny"], g["nx"], len(lv); FL = p2fl(lv)
     lat = g["lat0"] + g["dlat"] * np.arange(ny); lon = g["lon0"] + g["dlon"] * np.arange(nx)
     rows = {i: np.nonzero((lat >= i) & (lat < i + 1))[0] for i in range(LAT0, LAT1)}; cols = {j: np.nonzero((lon >= j) & (lon < j + 1))[0] for j in range(LON0, LON1)}
-    out = {"v": UK_V, "run": m.get("run"), "model": "UKMET", "wind_fl": [300, 340, 360, 390, 410], "unit": {"jet": "kt・FL", "vws": "kt/1000ft", "ti1": "1e-7/s2", "trop": "FL", "fz": "FL", "ice": "FL"}}
+    out = {"v": UK_V, "run": m.get("run"), "model": "UKMET", "wind_fl": [300, 340, 360, 390, 410], "unit": {"jet": "kt・FL", "vws": "kt/1000ft", "ti1": "1e-7/s2", "trop": "FL", "fz": "FL", "ice": "FL", "cld": "FL [下, 上] の並び", "msz": "K/km(ms_fl の層ごと)", "cape": "J/kg", "pr": "[mm/h, 対流性 %]"}}
     for s in m.get("slices", []):
         if s.get("lead") not in (0, 12): continue
         b = kv.get(s["key"]); ixb = kv.get(s["ix"]) if s.get("ix") else None; rhb = kv.get(s["rh"]) if s.get("rh") else None
@@ -143,6 +143,13 @@ def obs_ukmo(kv, d):
         tp = a[n3:n3 + ny * nx].reshape(ny, nx).astype(float); tp[tp == -32768] = np.nan; tpfl = p2fl(tp / 10)
         TI = np.frombuffer(ixb, "<i2").reshape(L, 1, ny, nx)[:, 0].astype(float) / 10 if ixb else None
         RH = np.frombuffer(rhb, "u1").reshape(L, ny, nx).astype(float) if rhb else None
+        if RH is not None: RH[RH == 255] = np.nan
+        # v2026-11-15 圏界面の後ろの面: CAPE(J/kg)、降水・対流性の雨・対流性の雪(mm/h ×10)。古い回には無い
+        pl_ = ny * nx; o_ = n3 + pl_; CAPE = PR = None
+        if a.size >= o_ + pl_:
+            CAPE = a[o_:o_ + pl_].reshape(ny, nx).astype(float); CAPE[CAPE == -32768] = np.nan
+        if a.size >= o_ + 4 * pl_:
+            PR = a[o_ + pl_:o_ + 4 * pl_].reshape(3, ny, nx).astype(float); PR[PR == -32768] = np.nan; PR /= 10
         # v210 ユーザー「TI1 だとかなり広範囲が塗られる」→ Map の塗りのしきい値を決めるため、日本付近(24〜46N・122〜148E)の FL300〜410 の層の TI1 の格子点の分布
         if TI is not None:
             jl = (lat >= 24) & (lat <= 46); jo = (lon >= 122) & (lon <= 148); lvs = (FL >= 290) & (FL <= 420)
@@ -185,7 +192,20 @@ def obs_ukmo(kv, d):
         dvdx = np.gradient(Vm, xx, axis=2) / coslat; dudy = np.gradient(Um * coslat, yy, axis=1) / coslat
         ETA = (dvdx - dudy + 2 * OM * np.sin(np.radians(lat))[:, None]) * 1e5
         ETA = np.where(up[:, None, None], ETA, np.nan)
-        rec = {"t": s["t"], "jet": {}, "vws": {}, "ti1": {}, "trop": {}, "fz": {}, "ice": {}, "wind": {}, "turn": {}, "ri": {}, "avo": {}, "tiz": {}, "riz": {}, "vwz": {}}
+        # v2026-11-15 雲の性質(揺れる対流性の雲か、揺れにくい層状の雲か)を AI が判定するための材料:
+        #   SAT = 雲の中(湿度 ≧ 95%、−20℃ 未満は ≧ 96.25%。湿度は 0℃ 未満が氷に対する値。Map の雲頂UK と同じ)
+        #   MS = 隣の面の間の層の、飽和相当温位 θe*(0℃ 未満は氷に対する飽和・昇華熱)の上下の差 K/km(上下どちらの面も雲の中の点だけ)。
+        #        負 = 雲の中で不安定(対流が起きる)、0〜1 = 中立に近い、大きいほど安定(層状で滑らか)
+        SAT = MS = None
+        if RH is not None:
+            SAT = RH >= np.where(T < -20, 96.25, 95)
+            TKs = T + 273.15; ew = 6.112 * np.exp(17.67 * T / (T + 243.5)); ei = 6.112 * np.exp(22.46 * T / (272.62 + T)); es = np.where(T < 0, ei, ew)
+            rs = 0.622 * es / (lv[:, None, None] - es); Lh = np.where(T < 0, 2.834e6, 2.5e6)
+            THE = TKs * (1000 / lv[:, None, None]) ** 0.2857 * np.exp(Lh * rs / (1004 * TKs))
+            MS = np.where(SAT[:-1] & SAT[1:], np.diff(THE, axis=0) / (dz / 1000), np.nan)
+        LC = [k for k in range(L - 1) if FL[k] >= 30 and FL[k + 1] <= 430]
+        out["ms_fl"] = [int(round((FL[k] + FL[k + 1]) / 20) * 10) for k in LC]
+        rec = {"t": s["t"], "jet": {}, "vws": {}, "ti1": {}, "trop": {}, "fz": {}, "ice": {}, "wind": {}, "turn": {}, "ri": {}, "avo": {}, "tiz": {}, "riz": {}, "vwz": {}, "cld": {}, "msz": {}, "cape": {}, "pr": {}}
         # v2026-10-19 ユーザー「Ri と TI1 見ても上の方が揺れ小さそうよね」(羽田〜千歳: 芯 FL390 より上は smooth、FL330〜370 は L〜LP)
         #   → AI が CAT の高さの範囲を「芯 ± 5000ft」でなく層で決められるように、高さごとの値も置く:
         #   tiz = prof_fl の各面の TI1(升の 90 パーセンタイル)、riz = ri_fl の各層(隣の面の間)の Ri(升の 10 パーセンタイル)
@@ -236,6 +256,26 @@ def obs_ukmo(kv, d):
                     if ic is not None:
                         lay = np.any(ic[(slice(None),) + sl].reshape(L, -1), axis=1)
                         if lay.any(): rec["ice"][k] = [int(FL[lay].min()), int(FL[lay].max())]
+                    if SAT is not None:
+                        # cld = 雲の層 [[下の FL, 上の FL], …](升の半分以上の点が雲の中の面が続く所)、msz = ms_fl の層ごとの雲の中の安定度 K/km(升の中央値。雲の中の点が 3 割未満の層は null)
+                        sf = np.nanmean(SAT[(slice(None),) + sl].reshape(L, -1), axis=1) >= 0.5; lays = []; k0 = None
+                        for q in range(L + 1):
+                            on = q < L and sf[q] and FL[q] >= 10
+                            if on and k0 is None: k0 = q
+                            if not on and k0 is not None: lays.append([int(round(FL[k0] / 10) * 10), int(round(FL[q - 1] / 10) * 10)]); k0 = None
+                        if lays: rec["cld"][k] = lays
+                        m_ = MS[(slice(None),) + sl].reshape(L - 1, -1); fr = np.mean(np.isfinite(m_), axis=1)
+                        if (fr[LC] >= 0.3).any():
+                            with warnings.catch_warnings():
+                                warnings.simplefilter("ignore"); md = np.nanmedian(m_, axis=1)
+                            rec["msz"][k] = [round(float(md[q]), 1) if fr[q] >= 0.3 and np.isfinite(md[q]) else None for q in LC]
+                    if CAPE is not None:
+                        v = np.nanmax(CAPE[sl])
+                        if np.isfinite(v) and v >= 50: rec["cape"][k] = int(round(v / 10) * 10)
+                    if PR is not None:
+                        tot = PR[0][sl]; cv = PR[1][sl] + np.nan_to_num(PR[2][sl])
+                        if np.isfinite(tot).any() and np.nanmax(tot) >= 0.5:   # [升の最大 mm/h, 升の雨のうち対流性の割合 %]
+                            rec["pr"][k] = [round(float(np.nanmax(tot)), 1), int(round(100 * min(1.0, float(np.nansum(cv)) / max(1e-6, float(np.nansum(tot))))))]
         out["t0" if s["lead"] == 0 else "f12"] = rec
     if "t0" not in out: return
     os.makedirs(os.path.dirname(f), exist_ok=True); json.dump(out, open(f, "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
