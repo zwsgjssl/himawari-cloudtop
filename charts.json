@@ -1,0 +1,166 @@
+{
+ "charts": [
+  {
+   "id": "spas",
+   "grp": "sfc",
+   "title": "SPAS 地上 実況(日本周辺)",
+   "lm": "20261114141130_0_Z__C_010000_20261114120000_MET_CHT_JCIspas_JCP600x581_JRjmahp_image.png",
+   "base": "2026-11-14T12:00Z",
+   "valid": "14日12Z 実況",
+   "w": 600,
+   "h": 581,
+   "bytes": 44700
+  },
+  {
+   "id": "fsas24",
+   "grp": "sfc",
+   "title": "FSAS24 地上 24時間予想",
+   "lm": "20261114190200_0_Z__C_010000_20261114120000_MET_CHT_JCIfsas24_Rjp_JCP600x581_Tjmahp_image.png",
+   "base": "2026-11-14T12:00Z",
+   "valid": "15日12Z 予想(初期 14日12Z)",
+   "w": 600,
+   "h": 581,
+   "bytes": 43966
+  },
+  {
+   "id": "aupq78",
+   "grp": "upper",
+   "title": "AUPQ78 700・850hPa 解析",
+   "lm": "Sat, 14 Nov 2026 15:36:25 GMT",
+   "base": "2026-11-14T12:00Z",
+   "valid": "14日12Z 解析",
+   "w": 1311,
+   "h": 1915,
+   "bytes": 280762
+  },
+  {
+   "id": "aupq35",
+   "grp": "upper",
+   "title": "AUPQ35 300・500hPa 解析",
+   "lm": "Sat, 14 Nov 2026 15:36:25 GMT",
+   "base": "2026-11-14T12:00Z",
+   "valid": "14日12Z 解析",
+   "w": 1311,
+   "h": 1915,
+   "bytes": 292883
+  },
+  {
+   "id": "aupa25",
+   "grp": "upper",
+   "title": "AUPA25 250hPa 解析",
+   "lm": "Sat, 14 Nov 2026 15:36:25 GMT",
+   "base": "2026-11-14T12:00Z",
+   "valid": "14日12Z 解析",
+   "w": 1526,
+   "h": 1311,
+   "bytes": 229489
+  },
+  {
+   "id": "aupa20",
+   "grp": "upper",
+   "title": "AUPA20 圏界面・200hPa ジェット 解析",
+   "lm": "Sat, 14 Nov 2026 15:36:25 GMT",
+   "base": "2026-11-14T12:00Z",
+   "valid": "14日12Z 解析",
+   "w": 1526,
+   "h": 1311,
+   "bytes": 270858
+  },
+  {
+   "id": "fupa502",
+   "grp": "upper",
+   "title": "FUPA502 500hPa 24時間予想",
+   "lm": "Sat, 14 Nov 2026 15:36:25 GMT",
+   "base": "2026-11-14T12:00Z",
+   "valid": "15日12Z 予想(初期 14日12Z)",
+   "w": 1526,
+   "h": 1311,
+   "bytes": 209625
+  },
+  {
+   "id": "fupa302",
+   "grp": "upper",
+   "title": "FUPA302 300hPa 24時間予想",
+   "lm": "Sat, 14 Nov 2026 15:36:25 GMT",
+   "base": "2026-11-14T12:00Z",
+   "valid": "15日12Z 予想(初期 14日12Z)",
+   "w": 1526,
+   "h": 1311,
+   "bytes": 222358
+  },
+  {
+   "id": "fupa252",
+   "grp": "upper",
+   "title": "FUPA252 250hPa 24時間予想",
+   "lm": "Sat, 14 Nov 2026 15:36:25 GMT",
+   "base": "2026-11-14T12:00Z",
+   "valid": "15日12Z 予想(初期 14日12Z)",
+   "w": 1526,
+   "h": 1311,
+   "bytes": 228527
+  },
+  {
+   "id": "axjp",
+   "grp": "upper",
+   "title": "AXJP130/140 高層断面図 解析(130°E・140°E)",
+   "lm": "Sat, 14 Nov 2026 13:52:26 GMT",
+   "base": "2026-11-14T12:00Z",
+   "valid": "14日12Z 解析",
+   "w": 1311,
+   "h": 1785,
+   "bytes": 213837
+  },
+  {
+   "id": "fxjp106",
+   "grp": "xs",
+   "title": "FXJP106 国内航空路 6・12時間予想断面図",
+   "lm": "Sat, 14 Nov 2026 17:14:07 GMT",
+   "base": "2026-11-14T15:00Z",
+   "valid": "初期 14日15Z(+6h 14日21Z・+12h 15日03Z)",
+   "w": 2048,
+   "h": 2545,
+   "bytes": 150035
+  },
+  {
+   "id": "fxjp854",
+   "grp": "upper",
+   "title": "FXJP854 850hPa 相当温位・風 12〜48時間予想",
+   "lm": "Sat, 14 Nov 2026 15:36:33 GMT",
+   "base": "2026-11-14T12:00Z",
+   "valid": "初期 14日12Z(+12〜+48h: 15日00Z〜16日12Z)",
+   "w": 1311,
+   "h": 1505,
+   "bytes": 470689
+  }
+ ],
+ "refs": [
+  {
+   "id": "fbjp",
+   "title": "FBJP 国内悪天予想図",
+   "lm": "Sat, 14 Nov 2026 18:20:29 GMT",
+   "at": "2026-11-14T18:20Z",
+   "file": "ref_fbjp.png",
+   "src": "https://www.data.jma.go.jp/airinfo/data/pict/fbjp/fbjp.png",
+   "bytes": 252817
+  },
+  {
+   "id": "cmnt_air",
+   "title": "全国航空気象解説報(国内空域)",
+   "lm": "Sat, 14 Nov 2026 19:10:31 GMT",
+   "at": "2026-11-14T19:10Z",
+   "file": "ref_cmnt_air.png",
+   "src": "https://www.data.jma.go.jp/airinfo/data/pict/ajpn_cmnt/qyya82.png",
+   "bytes": 318170
+  },
+  {
+   "id": "cmnt_fir",
+   "title": "全国航空気象解説報(福岡FIR)",
+   "lm": "Sat, 14 Nov 2026 19:20:29 GMT",
+   "at": "2026-11-14T19:20Z",
+   "file": "ref_cmnt_fir.png",
+   "src": "https://www.data.jma.go.jp/airinfo/data/pict/ajpn_cmnt/qyya83.png",
+   "bytes": 357991
+  }
+ ],
+ "made": "2026-11-14T19:24Z"
+}
