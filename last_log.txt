@@ -1,0 +1,5 @@
+19:47:02 SIGMET(福岡 FIR): 0 件(全体 134 件、FIR 65: AYPM CZEG CZVR EGGX EGPX ENOR FACA FAJA FAJO FBGR FCCC FIMM FMMM FNAN FSSS FYWH GOOO/O KZAK KZWY LECB LFMM LPPO LTAA LTBB MHTG MMFR MPZL NFFF NTTT NZZC NZZO OPLR PAZA RKRR RPHI SACF SARR SAVF SBAO SBAZ SBBS SBCW SBRE SCCZ SCEZ SCFZ SEFG SGFA SLLF SOOO SPIM SUEO SVZM UACN ULLL URRV VCCF VOMF WAAF WII、項目 ['base', 'chng', 'coords', 'dir', 'firId', 'firName', 'geom', 'hazard', 'icaoId', 'qualifier', 'rawSigmet', 'receiptTime', 'seriesId', 'spd', 'top', 'validTimeFrom', 'validTimeTo'])
+19:47:02 PIREP・AIREP(日本付近): 0 通
+19:47:03 TAF: 新しい物 0 通(全体 21 通、項目 ['bulletinTime', 'dbPopTime', 'elev', 'fcsts', 'icaoId', 'issueTime', 'lat', 'lon', 'mostRecent', 'name', 'prior', 'rawTAF', 'remarks', 'validTimeFrom', 'validTimeTo'])
+19:47:03 nwp_obs/obs/20261114.json に 19Z を記録: ltg, rad, metar, sigmet, pirep, taf, irmin, ctop
+19:47:04 衛星画像 19:00Z はもうあります
