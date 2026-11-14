@@ -1,15 +1,24 @@
-import io, json, requests, numpy as np
-from PIL import Image
-UA = {"User-Agent": "skai-pr-diag/1.0"}; B = "https://www.jma.go.jp/bosai/jmatile/data/rasrf"
-tt = requests.get(B + "/targetTimes.json", headers=UA, timeout=30).json()
-I = [e for e in tt if e["member"] == "immed"]; print(json.dumps(I))
-N = sorted([e for e in tt if e["basetime"].endswith("0000") and e["member"] == "none" and len(e["elements"]) > 5], key=lambda e: e["basetime"])
-b = N[-1]["basetime"]; print("none 毎時", b, sorted(e["validtime"][8:12] for e in tt if e["basetime"] == b and e["member"] == "none"))
-for e in sorted(I, key=lambda e: e["validtime"]):
-    for z in (6,):
-        u = f"{B}/{e['basetime']}/immed/{e['validtime']}/surf/rasrf/{z}/55/25.png"; r = requests.get(u, headers=UA, timeout=30)
-        try:
-            im = np.asarray(Image.open(io.BytesIO(r.content)).convert("RGBA")).reshape(-1, 4); s = {}
-            for c in map(tuple, im[im[:, 3] > 0][:, :3].tolist()): s[c] = s.get(c, 0) + 1
-            print(e["validtime"], r.status_code, sorted(s.items(), key=lambda kv: -kv[1])[:10])
-        except Exception as x: print(e["validtime"], r.status_code, r.content[:80])
+# 診断: 日本付近の公開 AIREP/PIREP(aviationweather.gov の Data API)がどれくらいあるか
+import json, requests, collections
+UA = {"User-Agent": "skai-pirep-check/1.0"}; B = "https://aviationweather.gov/api/data"
+tries = [
+  ("pirep bbox 24h", "/pirep", {"format": "json", "bbox": "20,118,50,152", "age": 24}),
+  ("pirep bbox 96h", "/pirep", {"format": "json", "bbox": "20,118,50,152", "age": 96}),
+  ("aircraftreport bbox", "/aircraftreport", {"format": "json", "bbox": "20,118,50,152", "age": 24}),
+  ("pirep id RJTT 500", "/pirep", {"format": "json", "id": "RJTT", "distance": 500, "age": 24}),
+  ("pirep global 24h", "/pirep", {"format": "json", "age": 24}),
+]
+for name, path, q in tries:
+    try:
+        r = requests.get(B + path, params=q, headers=UA, timeout=60); print("==", name, r.status_code, r.url, len(r.content))
+        try: d = r.json()
+        except Exception: print(r.text[:300]); continue
+        if isinstance(d, dict): print(list(d.keys())[:10]); d = d.get("data") or d.get("features") or []
+        print("件数", len(d))
+        if d: print("例", json.dumps(d[0], ensure_ascii=False)[:700])
+        JP = [x for x in d if isinstance(x, dict) and x.get("lat") is not None and 20 <= x["lat"] <= 50 and 118 <= x["lon"] <= 152]
+        print("日本付近", len(JP))
+        c = collections.Counter((x.get("pirepType") or x.get("reportType"), bool(x.get("tbInt1"))) for x in JP); print(c)
+        for x in JP[:8]: print("  ", x.get("obsTime"), x.get("receiptTime"), x.get("acType"), x.get("lat"), x.get("lon"), x.get("fltLvl"), x.get("tbInt1"), (x.get("rawOb") or "")[:120])
+        if JP: print("タービュランスあり", sum(1 for x in JP if x.get("tbInt1")))
+    except Exception as e: print(name, "ERR", e)
