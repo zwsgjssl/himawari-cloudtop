@@ -1,0 +1,109 @@
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 30452 (\N{CJK UNIFIED IDEOGRAPH-76F4}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 32218 (\N{CJK UNIFIED IDEOGRAPH-7DDA}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 20170 (\N{CJK UNIFIED IDEOGRAPH-4ECA}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 12398 (\N{HIRAGANA LETTER NO}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 23652 (\N{CJK UNIFIED IDEOGRAPH-5C64}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 12372 (\N{HIRAGANA LETTER GO}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 12392 (\N{HIRAGANA LETTER TO}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 30495 (\N{CJK UNIFIED IDEOGRAPH-771F}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 12435 (\N{HIRAGANA LETTER N}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 20013 (\N{CJK UNIFIED IDEOGRAPH-4E2D}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 38754 (\N{CJK UNIFIED IDEOGRAPH-9762}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 12391 (\N{HIRAGANA LETTER DE}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 19978 (\N{CJK UNIFIED IDEOGRAPH-4E0A}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 19979 (\N{CJK UNIFIED IDEOGRAPH-4E0B}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 24046 (\N{CJK UNIFIED IDEOGRAPH-5DEE}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 12424 (\N{HIRAGANA LETTER YO}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 12426 (\N{HIRAGANA LETTER RI}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 21069 (\N{CJK UNIFIED IDEOGRAPH-524D}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 12539 (\N{KATAKANA MIDDLE DOT}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 22823 (\N{CJK UNIFIED IDEOGRAPH-5927}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 12365 (\N{HIRAGANA LETTER KI}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 12356 (\N{HIRAGANA LETTER I}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 26041 (\N{CJK UNIFIED IDEOGRAPH-65B9}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 22238 (\N{CJK UNIFIED IDEOGRAPH-56DE}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 28857 (\N{CJK UNIFIED IDEOGRAPH-70B9}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 27671 (\N{CJK UNIFIED IDEOGRAPH-6C17}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:40: UserWarning: Glyph 22311 (\N{CJK UNIFIED IDEOGRAPH-5727}) missing from font(s) DejaVu Sans.
+  ax[0].set_ylabel("FL"); fig.suptitle("UKMET 00Z の回 12:00Z の VWS kt/1000ft(点線 = UKMET の気圧面)"); fig.tight_layout()
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 20170 (\N{CJK UNIFIED IDEOGRAPH-4ECA}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 12398 (\N{HIRAGANA LETTER NO}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 23652 (\N{CJK UNIFIED IDEOGRAPH-5C64}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 12372 (\N{HIRAGANA LETTER GO}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 12392 (\N{HIRAGANA LETTER TO}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 30495 (\N{CJK UNIFIED IDEOGRAPH-771F}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 12435 (\N{HIRAGANA LETTER N}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 20013 (\N{CJK UNIFIED IDEOGRAPH-4E2D}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 30452 (\N{CJK UNIFIED IDEOGRAPH-76F4}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 32218 (\N{CJK UNIFIED IDEOGRAPH-7DDA}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 38754 (\N{CJK UNIFIED IDEOGRAPH-9762}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 12391 (\N{HIRAGANA LETTER DE}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 19978 (\N{CJK UNIFIED IDEOGRAPH-4E0A}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 19979 (\N{CJK UNIFIED IDEOGRAPH-4E0B}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 24046 (\N{CJK UNIFIED IDEOGRAPH-5DEE}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 12424 (\N{HIRAGANA LETTER YO}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 12426 (\N{HIRAGANA LETTER RI}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 21069 (\N{CJK UNIFIED IDEOGRAPH-524D}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 12539 (\N{KATAKANA MIDDLE DOT}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 22823 (\N{CJK UNIFIED IDEOGRAPH-5927}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 12365 (\N{HIRAGANA LETTER KI}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 12356 (\N{HIRAGANA LETTER I}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 26041 (\N{CJK UNIFIED IDEOGRAPH-65B9}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 22238 (\N{CJK UNIFIED IDEOGRAPH-56DE}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 28857 (\N{CJK UNIFIED IDEOGRAPH-70B9}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 27671 (\N{CJK UNIFIED IDEOGRAPH-6C17}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+/home/runner/work/himawari-cloudtop/himawari-cloudtop/tools/pr_diag.py:41: UserWarning: Glyph 22311 (\N{CJK UNIFIED IDEOGRAPH-5727}) missing from font(s) DejaVu Sans.
+  os.makedirs("out", exist_ok=True); fig.savefig("out/vws.png", dpi=80)
+面の FL [4, 11, 18, 25, 32, 48, 64, 81, 99, 118, 138, 160, 183, 208, 236, 251, 266, 283, 301, 319, 340, 362, 386, 413, 443]
