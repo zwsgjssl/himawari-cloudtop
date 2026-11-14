@@ -7,7 +7,7 @@ URL = "https://aviationweather.gov/api/data/pirep"
 BOX = "20,110,55,160"   # 南,西,北,東: 日本付近と北太平洋の入り口(国際線の出発・到着の区間も)
 def key(x): return (x.get("rawOb") or "") + "|" + str(x.get("obsTime"))
 def main(d):
-    r = requests.get(URL, params={"format": "json", "bbox": BOX, "age": 30}, headers=UA, timeout=90); r.raise_for_status()
+    r = requests.get(URL, params={"format": "json", "bbox": BOX, "age": int(os.environ.get("AGE") or 30)}, headers=UA, timeout=90); r.raise_for_status()
     L = r.json(); L = L if isinstance(L, list) else (L.get("data") or [])
     have = set()
     for f in glob.glob(os.path.join(d, "*.jsonl")):

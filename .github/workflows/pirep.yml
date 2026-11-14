@@ -4,6 +4,8 @@ on:
   schedule:
     - cron: "17 */6 * * *"
   workflow_dispatch:
+    inputs:
+      age: { description: "何時間前まで取るか(最初のまとめ取り用)", default: "30" }
   # schedule が動かないことがあるので、毎時の「JMA NWP charts」のあとにも起こし、UTC 0・6・12・18 時台以外はすぐ終える
   workflow_run:
     workflows: ["JMA NWP charts"]
@@ -28,5 +30,5 @@ jobs:
           cp tools/pirep_collect.py /tmp/pc.py
           git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git fetch -q origin pirep-data && git checkout -q -B pirep-data origin/pirep-data || (git checkout -q --orphan pirep-data && git rm -rfq --cached . && git clean -fdxq)
-          python3 -u /tmp/pc.py data
+          AGE="${{ github.event.inputs.age }}" python3 -u /tmp/pc.py data
           git add data; git commit -qm "pirep $(date -u +%Y%m%dT%H%MZ)" && git push -q origin pirep-data || echo "新しい報告なし"
