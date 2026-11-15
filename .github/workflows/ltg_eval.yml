@@ -24,7 +24,7 @@ jobs:
           h=$(date -u +%H); h=$((10#$h))
           if [ "${{ github.event_name }}" = "workflow_run" ] && [ $(( (h + 2) % 3 )) -ne 0 ]; then echo "go=0" >> $GITHUB_OUTPUT; else echo "go=1" >> $GITHUB_OUTPUT; fi
       - if: steps.due.outputs.go == '1'
-        run: pip install --quiet numpy xarray h5netcdf h5py requests
+        run: pip install --quiet numpy xarray h5netcdf h5py requests global-land-mask
       - if: steps.due.outputs.go == '1'
         run: python3 -u tools/ltg_eval.py
       - if: steps.due.outputs.go == '1'
