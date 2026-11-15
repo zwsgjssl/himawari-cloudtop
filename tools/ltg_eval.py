@@ -83,11 +83,11 @@ def main():
     if "W" in P3:
         wi = (LV <= 700) & (LV >= 400); Wm = np.nanmax(P3["W"][wi], axis=0); ex["w0.1"] = Wm >= 0.1; ex["w0.2"] = Wm >= 0.2
     if "S" in P3 and "D" in P3:
-        rad = np.deg2rad(P3["D"]); U, V = -P3["S"]*np.sin(rad), -P3["S"]*np.cos(rad)
-        if str(P3.get("S_u", "")).strip().lower() in ("kt", "knots", "knot"): U, V = U*0.5144, V*0.5144
+        rad = np.deg2rad(P3["D"]); Uw, Vw = -P3["S"]*np.sin(rad), -P3["S"]*np.cos(rad)   # V は予報時刻なので別の名前
+        if str(P3.get("S_u", "")).strip().lower() in ("kt", "knots", "knot"): Uw, Vw = Uw*0.5144, Vw*0.5144
         Rr = 6371e3; dy = Rr*np.deg2rad(dlat); dx = Rr*np.cos(np.deg2rad(lat))[:, None]*np.deg2rad(dlon)
         li = [k for k, p_ in enumerate(LV) if p_ in (925, 850)]
-        dv = np.mean([np.gradient(U[k], axis=1)/dx + np.gradient(V[k], axis=0)/dy for k in li], axis=0)
+        dv = np.mean([np.gradient(Uw[k], axis=1)/dx + np.gradient(Vw[k], axis=0)/dy for k in li], axis=0)
         ex["cv1"] = -dv >= 1e-5; ex["cv3"] = -dv >= 3e-5
     for c in (100, 500):
         B = (F["cape"] >= c) & (cp >= 0.3)
