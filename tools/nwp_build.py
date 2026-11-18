@@ -325,12 +325,33 @@ def ai_from_file(base):
     if cl: out["claims"] = cl
     return out
 
-def write_img_dir(d, charts, parts, refs=()):
+# 2026-11-18 ユーザー「FBJP は最新版に加えて 1 つ前の物も重ねたい」→ 気象庁は最新の 1 枚しか出さないので、前の nwp-img の FBJP を ref_fbjp_prev.png に残す。
+#   FBJP が新しくなったら、それまでの最新を「前」に。変わっていなければ前の「前」をそのまま持ち越す。charts.json の prev_refs に一覧(Map の WX保存が使う)
+PREV_REF_IDS = ("fbjp",)
+def prev_refs_of(d, prev_dir, refs):
+    import shutil
+    if not prev_dir or not os.path.isdir(prev_dir): return []
+    try: pj = json.load(open(os.path.join(prev_dir, "charts.json"), encoding="utf-8"))
+    except Exception: return []
+    cur = {r["id"]: r for r, _ in refs}; out = []
+    for rid in PREV_REF_IDS:
+        old = next((r for r in pj.get("refs") or [] if r.get("id") == rid), None)
+        oldp = next((r for r in pj.get("prev_refs") or [] if r.get("id") == rid), None)
+        dst = os.path.join(d, f"ref_{rid}_prev.png")
+        if old and rid in cur and old.get("lm") and old.get("lm") != cur[rid].get("lm") and os.path.exists(os.path.join(prev_dir, old["file"])):
+            shutil.copyfile(os.path.join(prev_dir, old["file"]), dst); out.append(dict(old, file=f"ref_{rid}_prev.png"))
+        elif oldp and os.path.exists(os.path.join(prev_dir, oldp["file"])):
+            shutil.copyfile(os.path.join(prev_dir, oldp["file"]), dst); out.append(oldp)
+    for r in out: log(f"{r['id']} の 1 つ前: {r.get('lm')} を残しました")
+    return out
+
+def write_img_dir(d, charts, parts, refs=(), prev_dir=None):
     """スケジュール実行が読む用に、図(PNG)・答え合わせの資料(ref_<id>.png)と一覧(charts.json)をフォルダに"""
     os.makedirs(d, exist_ok=True)
     for c in charts: open(os.path.join(d, c["id"] + ".png"), "wb").write(parts[c["id"]])
     for r, b in refs: open(os.path.join(d, r["file"]), "wb").write(b)
-    json.dump({"charts": charts, "refs": [r for r, _ in refs], "made": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ")},
+    pr = prev_refs_of(d, prev_dir, refs)
+    json.dump({"charts": charts, "refs": [r for r, _ in refs], "prev_refs": pr, "made": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ")},
               open(os.path.join(d, "charts.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     log(f"{d}/ に図 {len(charts)} 枚・資料 {len(refs)} 枚と charts.json を出しました")
 
@@ -435,7 +456,7 @@ def main():
         except Exception: prev = None
         key = lambda L: sorted((x.get("id"), x.get("lm")) for x in (L or []))
         moved = prev is None or key(prev.get("charts")) != key(charts) or key(prev.get("refs")) != key([r for r, _ in refs])
-        if changed or a.img_always or moved: write_img_dir(a.img_dir, charts, parts, refs); keep_hist(a.img_dir, a.prev_dir, charts)
+        if changed or a.img_always or moved: write_img_dir(a.img_dir, charts, parts, refs, a.prev_dir); keep_hist(a.img_dir, a.prev_dir, charts)
     # AI の解説: 高層の図(grp upper)の初期時刻が全部同じとき。(1) スケジュール実行が書いた nwp_ai/ai.json(その回の物で、まだ取り込んでいなければ)(2) 無ければ Claude API(キーがあれば・回ごとに 1 回)
     ai = head.get("ai")
     bases = {c["base"] for c in charts if c.get("grp", "upper") == "upper"}   # v201 地上天気図は別の時刻でよい
