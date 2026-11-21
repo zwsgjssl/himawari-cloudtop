@@ -1,0 +1,14 @@
+13:24:02 雷: 12 個の記録、21 回
+13:24:04 レーダー: 20261121130000 升 124、20mm/h 以上の升 28
+13:24:04 METAR: 26 通
+13:24:04 SIGMET(福岡 FIR): 0 件(全体 112 件、FIR 55: ANAU AYPM BGGL CZEG FACA FAJA FAJO FCCC FIMM FNAN GOOO/O HRYR KZAK KZWY LPPC LPPO LRBB LTAA LTBB MHTG MMFR NZZO RKRR RPHI SACF SAEF SAMF SAVF SBAO SBAZ SBBS SBCW SBRE SCIZ SCTZ SEFG SGFA SKED SLLF SOOO SPIM SVZM UACN UHMM ULLL URRV USTV UTDD UUWV VABF WAAF WBFC WIIF YBBB YMMM、項目 ['base', 'chng', 'coords', 'dir', 'firId', 'firName', 'geom', 'hazard', 'icaoId', 'qualifier', 'rawSigmet', 'receiptTime', 'seriesId', 'spd', 'top', 'validTimeFrom', 'validTimeTo'])
+13:24:05 PIREP・AIREP(日本付近): 0 通
+13:24:05 TAF: 新しい物 0 通(全体 21 通、項目 ['bulletinTime', 'dbPopTime', 'elev', 'fcsts', 'icaoId', 'issueTime', 'lat', 'lon', 'mostRecent', 'name', 'prior', 'rawTAF', 'remarks', 'validTimeFrom', 'validTimeTo'])
+13:24:05 赤外 2026-11-21T13:10Z・雲頂 2026-11-21T13:00Z
+13:24:06 nwp_obs/obs/20261121.json に 13Z を記録: ltg, rad, metar, sigmet, pirep, taf, irmin, ctop
+13:24:09 取得 8 個 3秒
+13:24:12 B13 の温度 K 1/50/99%: 242/272/297
+13:24:12 ir_20261121T1300Z.png (851, 751) 426KB
+13:24:13 B08 の温度 K 1/50/99%: 226/238/248
+13:24:13 wv_20261121T1300Z.png (851, 751) 289KB
+13:24:13 衛星画像 できました 2026-11-21T13:00Z、7秒
