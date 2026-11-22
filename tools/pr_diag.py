@@ -7,8 +7,11 @@ sys.path.insert(0, os.path.dirname(__file__)); import ukmo_build as ub
 P = np.array(ub.LEVELS_HPA, float); G = 9.80665; R = 6371000.0
 def fl_of(p): return (1 - (p/1013.25)**0.190284)*145366.45/100
 FL = np.array([fl_of(p) for p in P])
-REP = json.load(open(os.path.join(os.path.dirname(__file__), "diagdata/pilot_reports.json")))
-SEV = {"NIL": 0, "LM-L": 1, "L-": 1, "L": 2, "L-LP": 2.5, "LP": 3, "LGT+": 3, "LM": 3.5, "LP-MOD": 4, "MOD": 4}
+# 2026-11-22 2 回目: 公開の PIREP(aviationweather.gov を集めた物。日本付近・FL150 以上・揺れの記載あり)で。強さは tbInt1(NEG = 揺れなし)
+PIR = json.load(open(os.path.join(os.path.dirname(__file__), "diagdata/pireps.json")))
+REP = [{"t": dt.datetime.utcfromtimestamp(x["obsTime"]).strftime("%Y-%m-%dT%H:%MZ"), "from": x.get("acType") or "?", "to": "", "fl": int(x["fltLvl"]),
+        "tb": x["tbInt1"], "pts": [[x["lat"], x["lon"]], [x["lat"], x["lon"]]]} for x in PIR]
+SEV = {"NEG": 0, "LGT": 2, "LGT-MOD": 3, "MOD": 4, "MOD-SEV": 4.5, "SEV": 4.5, "NIL": 0, "LM-L": 1, "L-": 1, "L": 2, "L-LP": 2.5, "LP": 3, "LGT+": 3, "LM": 3.5, "LP-MOD": 4, "MOD": 4}
 def has(key):
     try: return ub.exists(key)[0]
     except Exception: return False
@@ -59,8 +62,10 @@ for i, r in enumerate(REP):
     t = dt.datetime.strptime(r["t"], "%Y-%m-%dT%H:%MZ"); cases.setdefault(runs_for(t)[0][2], []).append(i)
 print("報告", len(REP), "件、時刻", len(cases), "個")
 F = {}
+import time as _t; T0 = _t.time()
 with tempfile.TemporaryDirectory() as w:
-    for v, idx in sorted(cases.items()):
+    for v, idx in sorted(cases.items(), key=lambda kv: -len(kv[1])):   # 報告の多い時刻から
+        if _t.time() - T0 > 36*60: print("時間切れ。ここまで", len(F), "時刻"); break
         t = dt.datetime.strptime(REP[idx[0]]["t"], "%Y-%m-%dT%H:%MZ"); got = None
         for run, lead, _ in runs_for(t):
             if lead + 3 > 21: continue
@@ -104,12 +109,13 @@ for i, r in enumerate(REP):
     if key not in F: continue
     lat, lon, f, run, lead = F[key]
     fl = r.get("fl"); fl = [fl, fl] if isinstance(fl, (int, float)) else (fl or [250, 400])
-    Ls = [k for k in range(len(P)) if fl[0] - 15 <= FL[k] <= fl[1] + 15] or [int(np.argmin(abs(FL - np.mean(fl))))]
-    pts = r.get("pts") or []; a, b = pts[0], pts[-1]
-    ss = np.linspace(0, 1, 7); ys = [int(np.argmin(abs(lat - (a[0] + (b[0]-a[0])*s)))) for s in ss]; xs = [int(np.argmin(abs(lon - (a[1] + (b[1]-a[1])*s)))) for s in ss]
+    Ls = sorted(set([int(np.argmin(abs(FL - fl[0])))] + [k for k in range(len(P)) if abs(FL[k] - fl[0]) <= 12]))
+    pts = r.get("pts") or []; a = pts[0]
+    yy = [k for k in range(len(lat)) if abs(lat[k] - a[0]) <= 0.3]; xx = [k for k in range(len(lon)) if abs(lon[k] - a[1]) <= 0.3]
+    ys = [y for y in yy for x in xx]; xs = [x for y in yy for x in xx]
     res = [pct(f, k, Ls, ys, xs) for k in NAMES]
     tb = str(r.get("tb")); rows.append((SEV.get(tb, 2), res))
-    print(f"{r['t']:16} {str(r.get('from'))[:5]+'-'+str(r.get('to'))[:6]:12} {str(fl[0])+'-'+str(fl[1]):>9} {tb:6} " + " ".join(f"{p:5.0f}%({x:5.2g})" for p, x in res))
+
 print("\nまとめ(揺れの強さ 0=NIL〜4=MOD と、順位 % の順位相関。+1 に近いほど揺れの強さどおり。揺れた報告(L 以上)の順位の平均と、NIL の平均)")
 sev = np.array([s for s, _ in rows])
 for j, n in enumerate(NAMES):
@@ -117,3 +123,12 @@ for j, n in enumerate(NAMES):
     rk = lambda a: np.argsort(np.argsort(a)).astype(float)
     rho = np.corrcoef(rk(sev), rk(pc))[0, 1] if len(set(sev)) > 1 else np.nan
     print(f"  {n:5}: 順位相関 {rho:+.2f}  揺れた所の平均 {pc[sev >= 2].mean():4.0f}%  MOD・LM 以上の平均 {pc[sev >= 3.5].mean() if (sev >= 3.5).any() else np.nan:4.0f}%  NIL の平均 {pc[sev == 0].mean() if (sev == 0).any() else np.nan:4.0f}%  (件数 {len(pc)})")
+
+def auc(pos, neg):
+    if not len(pos) or not len(neg): return np.nan
+    return float(np.mean([(p > n) + 0.5*(p == n) for p in pos for n in neg]))
+print("\nAUC(揺れた報告と NEG を、順位 % で見分けられる割合。0.5 = 当てずっぽう、1 = 完全)")
+for j, n in enumerate(NAMES):
+    pc = np.array([res[j][0] for _, res in rows])
+    print(f"  {n:5}: LGT 以上 vs NEG {auc(pc[sev >= 2], pc[sev == 0]):.2f}   MOD 以上 vs NEG {auc(pc[sev >= 4], pc[sev == 0]):.2f}   MOD 以上 vs LGT {auc(pc[sev >= 4], pc[(sev >= 2) & (sev < 3)]):.2f}")
+print("件数: NEG", int((sev == 0).sum()), " LGT", int(((sev >= 2) & (sev < 3)).sum()), " LGT-MOD", int((sev == 3).sum()), " MOD 以上", int((sev >= 4).sum()))
