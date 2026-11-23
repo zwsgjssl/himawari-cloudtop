@@ -1,3 +1,4 @@
+# 診断(2026-11-23 3 回目: Ri を上回る組み合わせを探すため、報告ごとの値を out/feat.json に書き出す)
 # 診断(2026-11-22): CCAT を戻すか決めるための答え合わせ。nwp_ai/pilot_reports.json の揺れの報告(揺れなかった NIL も)の時刻・場所・高さで、
 #   UKMET から Ri(VWS 6kt/1000ft 未満は無し)・TI1・VWS・LWS・CCAT(v136 の作り方を作り直し)を計算し、
 #   「報告の場所の値が、その時刻の日本付近の同じ高さの帯の中で何 % 目か(順位)」を並べる。揺れた所で高く・揺れなかった所で低いほど良い指標。
@@ -30,6 +31,14 @@ def load(run, lead, w):
     TK = T if np.nanmean(T) > 150 else T + 273.15
     Sms = S/1.94384 if uS.strip().lower() in ("kt", "knots", "knot") else S
     rad = np.deg2rad(D); return lat, lon, TK, -Sms*np.sin(rad), -Sms*np.cos(rad)
+def load_ex(run, lead, w):
+    """3 回目: 湿度・圏界面・CAPE・対流性の雨(無ければ None)"""
+    out = {}
+    for k, nm, lv in (("RH", ub.FILES["RH"], True), ("TP", ub.FILES["TP"], False), ("CAPE", ub.CAPE_FILE, False), ("CR", "rainfall_rate_from_convection", False)):
+        try:
+            p = os.path.join(w, "x.nc"); ub.download(ub.key_of(run, lead, nm), p); r = ub.cut(p, lv); os.remove(p); out[k] = (r[2], r[3])
+        except Exception as e: out[k] = None
+    return out
 def fields(lat, lon, TK, u, v, u2=None, v2=None, dts=None):
     p = P[:, None, None]; th = TK*(1000/p)**0.2857
     dzl = 29.2712*(TK[:-1] + TK[1:])/2*np.log(p[:-1]/p[1:])
@@ -55,8 +64,9 @@ def fields(lat, lon, TK, u, v, u2=None, v2=None, dts=None):
     LRo = np.hypot(dudt + ADu, dvdt + ADv)/(f*np.maximum(np.hypot(u, v), 5.0))
     LWS = np.hypot(gx(np.hypot(u, v)), gy(np.hypot(u, v)))*1.94384*111120          # 水平シアーの大きさ kt/60NM(目安。本番の LWS は風に直角の向きだけ)
     LWS = np.where(np.hypot(u, v)*1.94384 < 50, 0, LWS)
+    N2 = np.full_like(u, np.nan); N2[:-1] = N2l; N2[1:] = np.fmin(N2[1:], N2l)
     return {"iRi": np.minimum(1/np.maximum(Ri, 0.1), 10.0)*(Ri < 99), "TI1": TI1, "VWS": VWS*1.94384*304.8, "LWS": LWS,
-            "_fg": np.maximum(FG, 0), "_nc": NC, "_lro": LRo}
+            "_fg": np.maximum(FG, 0), "_nc": NC, "_lro": LRo, "SPD": np.hypot(u, v)*1.94384, "N2": N2*1e4, "DEF": DEF*1e5}
 cases = {}
 for i, r in enumerate(REP):
     t = dt.datetime.strptime(r["t"], "%Y-%m-%dT%H:%MZ"); cases.setdefault(runs_for(t)[0][2], []).append(i)
@@ -65,7 +75,7 @@ F = {}
 import time as _t; T0 = _t.time()
 with tempfile.TemporaryDirectory() as w:
     for v, idx in sorted(cases.items(), key=lambda kv: -len(kv[1])):   # 報告の多い時刻から
-        if _t.time() - T0 > 36*60: print("時間切れ。ここまで", len(F), "時刻"); break
+        if _t.time() - T0 > 44*60: print("時間切れ。ここまで", len(F), "時刻"); break
         t = dt.datetime.strptime(REP[idx[0]]["t"], "%Y-%m-%dT%H:%MZ"); got = None
         for run, lead, _ in runs_for(t):
             if lead + 3 > 21: continue
@@ -75,7 +85,14 @@ with tempfile.TemporaryDirectory() as w:
         try:
             lat, lon, TK, u, v_ = load(run, lead, w); _, _, _, u2, v2 = load(run, lead + 3, w)
         except Exception as e: print(v, "読めない", e); continue
-        F[v] = (lat, lon, fields(lat, lon, TK, u, v_, u2, v2, 3*3600.0), run, lead)
+        ff = fields(lat, lon, TK, u, v_, u2, v2, 3*3600.0); ex = load_ex(run, lead, w)
+        if ex["RH"] is not None: ff["RH"] = ex["RH"][0]
+        if ex["TP"] is not None:
+            tp = ex["TP"][0]; tp = tp/100 if np.nanmean(tp) > 2000 else tp                       # Pa → hPa
+            ff["dTP"] = np.abs(FL[:, None, None] - fl_of(tp)[None])                              # 圏界面からの離れ(FL)
+        for k in ("CAPE", "CR"):
+            if ex[k] is not None: ff[k] = np.repeat(np.asarray(ex[k][0], float)[None], len(P), 0)
+        F[v] = (lat, lon, ff, run, lead)
         print(v, "←", run, "+", lead, "h")
 if not F: sys.exit()
 # CCAT の気候値(全部の時刻・FL150〜450 の面で)
@@ -101,7 +118,7 @@ def pct(f, k, Ls, ys, xs):
     vals = [f[k][L, y, x] for L in Ls for y, x in zip(ys, xs)]; v = np.nanmax(vals)
     pool = np.concatenate([f[k][L].ravel() for L in Ls]); pool = pool[np.isfinite(pool)]
     return 100.0*np.mean(pool < v), v
-rows = []
+rows = []; FEAT = []
 print("\n報告ごと: 報告の場所の値が、同じ時刻・同じ高さの帯の日本付近全体で何 % 目か(100 に近いほど「いつもより強い」)")
 print(f"{'時刻':16} {'区間':12} {'FL':>9} {'報告':6} " + " ".join(f"{n:>11}" for n in NAMES))
 for i, r in enumerate(REP):
@@ -115,6 +132,16 @@ for i, r in enumerate(REP):
     ys = [y for y in yy for x in xx]; xs = [x for y in yy for x in xx]
     res = [pct(f, k, Ls, ys, xs) for k in NAMES]
     tb = str(r.get("tb")); rows.append((SEV.get(tb, 2), res))
+    ft = {"i": i, "t": r["t"], "tb": tb, "sev": SEV.get(tb, 2), "fl": fl[0], "lat": a[0], "lon": a[1]}
+    for k in ("iRi", "TI1", "VWS", "LWS", "CCAT", "_fg", "_nc", "_lro", "SPD", "N2", "DEF", "RH", "dTP", "CAPE", "CR"):
+        if k not in f: continue
+        try:
+            pv, vv = pct(f, k, Ls, ys, xs)
+            if k in ("N2", "dTP"):   # 小さいほど効く物は一番小さい値も
+                vals = [f[k][L, y, x] for L in Ls for y, x in zip(ys, xs)]; ft[k + "_min"] = float(np.nanmin(vals))
+            ft[k] = float(vv); ft[k + "_p"] = float(pv)
+        except Exception: pass
+    FEAT.append(ft)
 
 print("\nまとめ(揺れの強さ 0=NIL〜4=MOD と、順位 % の順位相関。+1 に近いほど揺れの強さどおり。揺れた報告(L 以上)の順位の平均と、NIL の平均)")
 sev = np.array([s for s, _ in rows])
@@ -132,3 +159,6 @@ for j, n in enumerate(NAMES):
     pc = np.array([res[j][0] for _, res in rows])
     print(f"  {n:5}: LGT 以上 vs NEG {auc(pc[sev >= 2], pc[sev == 0]):.2f}   MOD 以上 vs NEG {auc(pc[sev >= 4], pc[sev == 0]):.2f}   MOD 以上 vs LGT {auc(pc[sev >= 4], pc[(sev >= 2) & (sev < 3)]):.2f}")
 print("件数: NEG", int((sev == 0).sum()), " LGT", int(((sev >= 2) & (sev < 3)).sum()), " LGT-MOD", int((sev == 3).sum()), " MOD 以上", int((sev >= 4).sum()))
+
+os.makedirs("out", exist_ok=True); json.dump(FEAT, open("out/feat.json", "w"), ensure_ascii=False)
+print("feat.json", len(FEAT), "件")
