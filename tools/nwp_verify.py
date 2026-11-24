@@ -253,10 +253,20 @@ def main():
             print(f"- {c.get('id')} {c.get('kind')} 「{c.get('text', '')[:80]}」 {c['from'][8:13]}〜{c['to'][8:13]} → **{v}**")
             for x in info: print(f"    - {x}")
             r["claims"].append({"id": c.get("id"), "kind": c.get("kind"), "verdict": v, "info": info})
+        # 2026-11-25 ユーザー「シアーだけの CAT は書かなくていいけど、裏で計算して答え合わせはしておいてほしい。今後のために」
+        #   → ai.json の shadow(シアー・Ri だけで決めた CAT。アプリには出さない)も同じ決まりで判定して、成績は「shadow」として分けて貯める
+        sh = [c for c in h.get("shadow") or [] if isinstance(c, dict) and c.get("box") and c.get("from") and c.get("to")]
+        if sh: print(f"- 裏の CAT(shadow、アプリに出さない) {len(sh)} 個:")
+        for c in sh:
+            if T(c["from"]) > now: print(f"    - {c.get('id')}: まだ先"); continue
+            v, info = judge(dict(c, kind="cat"), obs, SG, PR, UK)
+            print(f"    - {c.get('id')} 「{c.get('text', '')[:60]}」 {c['from'][8:13]}〜{c['to'][8:13]} → **{v}**")
+            r["claims"].append({"id": c.get("id"), "kind": "shadow", "verdict": v, "info": info[:4]})
         # 2026-11-05 成績(当たり・外れ・空振り・分からない)と箱の広さ。空振りが増えていないかを回ごとに追う
         sc = {"base": b, "n": {}, "area": {}}
         for c in cl:
             k = c.get("kind"); sc["area"][k] = round(sc["area"].get(k, 0) + area_nm2(c["box"]) / 1e4, 1)
+        for c in sh: sc["area"]["shadow"] = round(sc["area"].get("shadow", 0) + area_nm2(c["box"]) / 1e4, 1)
         for x in r["claims"]:
             k, v = x["kind"], x["verdict"]
             g = "当たり(広すぎ)" if "広すぎ" in v else "当たり" if v.startswith("当たり") else "外れ" if v.startswith("外れ") else "空振り" if v.startswith("空振り") else "根拠あり" if "根拠あり" in v else "分からない"
@@ -277,6 +287,8 @@ def main():
         print("\n## 成績の推移(新しい 10 回。空振り = 揺れなしの報告か UKMET 解析でも根拠なし、箱の広さ = 万NM²)")
         for b in sorted(S)[-10:]:
             x = S[b]; ct = x["n"].get("cat", {}); cb = x["n"].get("cb", {}); n = sum(ct.values())
+            shd = x["n"].get("shadow", {})
+            if shd: print(f"  (裏の CAT {sum(shd.values())} 個: 当たり {shd.get('当たり', 0)}・根拠あり {shd.get('根拠あり', 0)}・空振り {shd.get('空振り', 0)}・分からない {shd.get('分からない', 0)})")
             print(f"- {b}: CAT {n} 個(当たり {ct.get('当たり', 0)}・根拠あり {ct.get('根拠あり', 0)}・空振り {ct.get('空振り', 0)}・分からない {ct.get('分からない', 0)})"
                   f" 箱 {x['area'].get('cat', 0)} / CB {sum(cb.values())} 個(当たり {cb.get('当たり', 0)}・広すぎ {cb.get('当たり(広すぎ)', 0)}・外れ {cb.get('外れ', 0)}) 箱 {x['area'].get('cb', 0)}")
     # v208 本人の揺れの報告ごとに: どの回のどの CAT の予想に入っていたか、その時刻に近い UKMET(解析 t0 か 12 時間予想 f12)の値
