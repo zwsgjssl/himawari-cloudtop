@@ -8,6 +8,7 @@
   - キー・トークン・PIN・シークレットの値(GitHub Secrets の名前は書いてよい、値は書かない)
   - 個人のアカウント名が入った URL
   - 会社の PIREP・NOTAM・資料などの非公開の情報、会社経路の RTE 文字列(路線名・FIX 名・航空路名は書いてよい)
+    (会社の PIREP を答え合わせに使うのは非公開の approach-planner-private の中だけ。ここの prdiag には持ち込まない)
   - DRM・navlog の中身、人の名前
 - 揺れの強さは LGT- / LGT / LGT+ / MOD だけ。SEV は使わない。MOD は SIGMET か MOD の PIREP 2 件以上のときだけ。
 
