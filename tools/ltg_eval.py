@@ -106,6 +106,11 @@ def main():
         cnt = lambda D: [int((M & On & D).sum()), int((M & ~On & D).sum()), int((O & Fn & D).sum()), int((O & ~Fn & D).sum()), int((M & D).sum())]
         res["c"][k] = cnt(dom)   # 予報の升で当たり・空振り、雷の升で拾えた・見逃し、予報の升の数
         if land is not None: res["cl"][k] = cnt(dom & land); res["cs"][k] = cnt(dom & ~land)
+    # 2026-11-24 ユーザー「(雷の点の場所も残すのは)いいね」→ 海域ごとに当たったか見られるように、雷のあった升を [経度, 緯度, Map の今の決まりの 30km 以内か(1/0)] で残す。
+    #   Map の今の決まり = v349 の cape100_conv0.3_cv3。升の中心を 0.01° に丸める(同じ升は 1 つ)
+    Mm = cands.get("cape100_conv0.3_cv3"); Fm = grow(Mm, 3) if Mm is not None else None
+    jj, ii = np.where(O & dom)
+    res["pts"] = [[round(float(lon[i]), 2), round(float(lat[j]), 2), int(bool(Fm[j, i])) if Fm is not None else -1] for j, i in zip(jj, ii)]
     print(json.dumps(res), flush=True)
     os.makedirs("out", exist_ok=True); open("out/line.json", "w").write(json.dumps(res) + "\n")
 if __name__ == "__main__": main()
