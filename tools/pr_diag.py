@@ -1,3 +1,4 @@
+# 診断(2026-11-25、その 4: 格子の値も out/ に npz で。手元で会社の図に重ねる)
 # 診断(2026-11-25、その 3): ユーザー「会社の断面図がどの層をとってるのか調べて」(HND→GMP・HND→TSA、valid 25日 00Z)
 #   会社の図と同じ向き(左 = 行き先、右 = 羽田)・縦は ISA の高さで、VWS 6・9・12 の線を層の取り方と回を変えて描く(図は out/ に)
 #   会社の飛行計画の風は前の回の UKMET(PROG 欄)なので、24日 12Z・06Z、23日 12Z の回も描く
@@ -10,7 +11,7 @@ def ft(p): return (1 - (p/1013.25)**0.190284)*145366.45
 RT = {"GMP": ((37.558, 126.791), (35.553, 139.781)), "TSA": ((25.069, 121.552), (35.553, 139.781))}
 SETS = {"25面(Map)": PLs, "50hPa": [1000, 950, 900, 850, 800, 700, 600, 500, 450, 400, 350, 300, 250, 200, 150],
         "GSM風": [1000, 975, 950, 925, 900, 850, 800, 700, 600, 500, 400, 300, 250, 200, 150], "主な面": [1000, 925, 850, 700, 500, 400, 300, 250, 200, 150]}
-RUNS = [("20261124T1200Z", 12), ("20261124T0600Z", 18), ("20261123T1200Z", 36)]
+RUNS = [("20261124T1200Z", 12)]
 N = 61; ZG = np.arange(5000, 45001, 250)
 def get(run, lead, nm, w):
     p = os.path.join(w, "x.nc"); ub.download(ub.key_of(run, lead, nm), p); r = ub.cut(p, True); os.remove(p); return r
@@ -44,4 +45,5 @@ for rt in RT:
         ax.set_title(f"{run[6:8]}日{run[9:11]}Z の回・{sn}  6以上 {np.nanmean(g >= 6)*100:.0f}%・最大 {np.nanmax(g):.1f}", fontsize=10)
         print(rt, run, sn, "6以上 %.0f%%  9以上 %.0f%%  最大 %.1f" % (np.nanmean(g >= 6)*100, np.nanmean(g >= 9)*100, np.nanmax(g)))
     fig.tight_layout(); fig.savefig(f"out/vws_{rt}.png", dpi=70); plt.close(fig)
+np.savez_compressed("out/vws_grids.npz", ZG=ZG, **{f"{rt}_{i}": section("20261124T1200Z", rt, SETS[sn]) for rt in RT for i, sn in enumerate(SETS)})
 print("図: out/vws_GMP.png・out/vws_TSA.png(左 = 行き先、右 = 羽田、縦 = FL)")
