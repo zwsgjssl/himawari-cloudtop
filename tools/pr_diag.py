@@ -1,3 +1,4 @@
+# 診断(2026-11-25、その 5: 750・650・550 も入れた本当の 50hPa おきを足す)
 # 診断(2026-11-25、その 4: 格子の値も out/ に npz で。手元で会社の図に重ねる)
 # 診断(2026-11-25、その 3): ユーザー「会社の断面図がどの層をとってるのか調べて」(HND→GMP・HND→TSA、valid 25日 00Z)
 #   会社の図と同じ向き(左 = 行き先、右 = 羽田)・縦は ISA の高さで、VWS 6・9・12 の線を層の取り方と回を変えて描く(図は out/ に)
@@ -10,7 +11,7 @@ P = np.array(ub.LEVELS_HPA, float); PLs = list(P)
 def ft(p): return (1 - (p/1013.25)**0.190284)*145366.45
 RT = {"GMP": ((37.558, 126.791), (35.553, 139.781)), "TSA": ((25.069, 121.552), (35.553, 139.781))}
 SETS = {"25面(Map)": PLs, "50hPa": [1000, 950, 900, 850, 800, 700, 600, 500, 450, 400, 350, 300, 250, 200, 150],
-        "GSM風": [1000, 975, 950, 925, 900, 850, 800, 700, 600, 500, 400, 300, 250, 200, 150], "主な面": [1000, 925, 850, 700, 500, 400, 300, 250, 200, 150]}
+        "GSM風": [1000, 975, 950, 925, 900, 850, 800, 700, 600, 500, 400, 300, 250, 200, 150], "主な面": [1000, 925, 850, 700, 500, 400, 300, 250, 200, 150], "全50hPa": [1000, 950, 900, 850, 800, 750, 700, 650, 600, 550, 500, 450, 400, 350, 300, 250, 200, 150]}
 RUNS = [("20261124T1200Z", 12)]
 N = 61; ZG = np.arange(5000, 45001, 250)
 def get(run, lead, nm, w):
@@ -37,7 +38,7 @@ def section(run, rt, lv):
 os.makedirs("out", exist_ok=True)
 for rt in RT:
     panels = [(r, s) for r in [x[0] for x in RUNS] if r in DATA for s in SETS]
-    fig, axs = plt.subplots(len(panels)//4, 4, figsize=(22, 4.2*len(panels)//4), squeeze=False)
+    fig, axs = plt.subplots(1, len(panels), figsize=(5.5*len(panels), 4.2), squeeze=False)
     for ax, (run, sn) in zip(axs.flat, panels):
         g = section(run, rt, SETS[sn]); X = np.linspace(0, 1, N)
         ax.set_facecolor("black"); ax.contour(X, ZG/100, g, levels=[6, 9, 12], colors=["#7bed2a", "#ffd400", "#ff7a00"], linewidths=1.6)
