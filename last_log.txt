@@ -1,0 +1,14 @@
+17:24:06 雷: 12 個の記録、871 回
+17:24:07 レーダー: 20261128170000 升 149、20mm/h 以上の升 24
+17:24:07 METAR: 26 通
+17:24:07 SIGMET(福岡 FIR): 5 件(全体 133 件、FIR 60: BIRD DAAA EGPX EGTT ENOR FACA FAJA FAJO FBGR FCCC FIMM FMMM FNAN GOOO GOOO/O KZAK KZWY LDZO LGGG LJLA LPPO LQSB LRBB LTBB MHTG MMFR NFFF NTTT RJJJ RKRR SAEF SAMF SAVF SBAO SBAZ SBBS SBCW SBRE SCCZ SCEZ SEFG SLLF SOOO SPIM UACN UHHH UHMM ULLL UNKL URRV VABF VTBB VVTS WAAF WBFC WIIF WMFC YBBB YMMM ZSH、項目 ['base', 'chng', 'coords', 'dir', 'firId', 'firName', 'geom', 'hazard', 'icaoId', 'qualifier', 'rawSigmet', 'receiptTime', 'seriesId', 'spd', 'top', 'validTimeFrom', 'validTimeTo'])
+17:24:07 PIREP・AIREP(日本付近): 0 通
+17:24:07 TAF: 新しい物 0 通(全体 21 通、項目 ['bulletinTime', 'dbPopTime', 'elev', 'fcsts', 'icaoId', 'issueTime', 'lat', 'lon', 'mostRecent', 'name', 'prior', 'rawTAF', 'remarks', 'validTimeFrom', 'validTimeTo'])
+17:24:08 赤外 2026-11-28T17:00Z・雲頂 2026-11-28T16:50Z
+17:24:09 nwp_obs/obs/20261128.json に 17Z を記録: ltg, rad, metar, sigmet, pirep, taf, irmin, ctop
+17:24:10 取得 8 個 1秒
+17:24:13 B13 の温度 K 1/50/99%: 219/268/296
+17:24:13 ir_20261128T1700Z.png (851, 751) 451KB
+17:24:14 B08 の温度 K 1/50/99%: 217/236/255
+17:24:14 wv_20261128T1700Z.png (851, 751) 343KB
+17:24:14 衛星画像 できました 2026-11-28T17:00Z、5秒
