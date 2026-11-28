@@ -1,0 +1,177 @@
+{
+ "charts": [
+  {
+   "id": "spas",
+   "grp": "sfc",
+   "title": "SPAS 地上 実況(日本周辺)",
+   "lm": "20261128141200_0_Z__C_010000_20261128120000_MET_CHT_JCIspas_JCP600x581_JRjmahp_image.png",
+   "base": "2026-11-28T12:00Z",
+   "valid": "28日12Z 実況",
+   "w": 600,
+   "h": 581,
+   "bytes": 49432
+  },
+  {
+   "id": "fsas24",
+   "grp": "sfc",
+   "title": "FSAS24 地上 24時間予想",
+   "lm": "20261128051600_0_Z__C_010000_20261128000000_MET_CHT_JCIfsas24_Rjp_JCP600x581_Tjmahp_image.png",
+   "base": "2026-11-28T00:00Z",
+   "valid": "29日00Z 予想(初期 28日00Z)",
+   "w": 600,
+   "h": 581,
+   "bytes": 46435
+  },
+  {
+   "id": "aupq78",
+   "grp": "upper",
+   "title": "AUPQ78 700・850hPa 解析",
+   "lm": "Sat, 28 Nov 2026 15:36:41 GMT",
+   "base": "2026-11-28T12:00Z",
+   "valid": "28日12Z 解析",
+   "w": 1311,
+   "h": 1915,
+   "bytes": 299840
+  },
+  {
+   "id": "aupq35",
+   "grp": "upper",
+   "title": "AUPQ35 300・500hPa 解析",
+   "lm": "Sat, 28 Nov 2026 15:36:32 GMT",
+   "base": "2026-11-28T12:00Z",
+   "valid": "28日12Z 解析",
+   "w": 1311,
+   "h": 1915,
+   "bytes": 310249
+  },
+  {
+   "id": "aupa25",
+   "grp": "upper",
+   "title": "AUPA25 250hPa 解析",
+   "lm": "Sat, 28 Nov 2026 15:36:32 GMT",
+   "base": "2026-11-28T12:00Z",
+   "valid": "28日12Z 解析",
+   "w": 1526,
+   "h": 1311,
+   "bytes": 237330
+  },
+  {
+   "id": "aupa20",
+   "grp": "upper",
+   "title": "AUPA20 圏界面・200hPa ジェット 解析",
+   "lm": "Sat, 28 Nov 2026 15:36:32 GMT",
+   "base": "2026-11-28T12:00Z",
+   "valid": "28日12Z 解析",
+   "w": 1526,
+   "h": 1311,
+   "bytes": 276692
+  },
+  {
+   "id": "fupa502",
+   "grp": "upper",
+   "title": "FUPA502 500hPa 24時間予想",
+   "lm": "Sat, 28 Nov 2026 15:36:32 GMT",
+   "base": "2026-11-28T12:00Z",
+   "valid": "29日12Z 予想(初期 28日12Z)",
+   "w": 1526,
+   "h": 1311,
+   "bytes": 220976
+  },
+  {
+   "id": "fupa302",
+   "grp": "upper",
+   "title": "FUPA302 300hPa 24時間予想",
+   "lm": "Sat, 28 Nov 2026 15:36:32 GMT",
+   "base": "2026-11-28T12:00Z",
+   "valid": "29日12Z 予想(初期 28日12Z)",
+   "w": 1526,
+   "h": 1311,
+   "bytes": 224468
+  },
+  {
+   "id": "fupa252",
+   "grp": "upper",
+   "title": "FUPA252 250hPa 24時間予想",
+   "lm": "Sat, 28 Nov 2026 15:36:32 GMT",
+   "base": "2026-11-28T12:00Z",
+   "valid": "29日12Z 予想(初期 28日12Z)",
+   "w": 1526,
+   "h": 1311,
+   "bytes": 230083
+  },
+  {
+   "id": "axjp",
+   "grp": "upper",
+   "title": "AXJP130/140 高層断面図 解析(130°E・140°E)",
+   "lm": "Sat, 28 Nov 2026 13:52:26 GMT",
+   "base": "2026-11-28T12:00Z",
+   "valid": "28日12Z 解析",
+   "w": 1311,
+   "h": 1785,
+   "bytes": 231514
+  },
+  {
+   "id": "fxjp106",
+   "grp": "xs",
+   "title": "FXJP106 国内航空路 6・12時間予想断面図",
+   "lm": "Sat, 28 Nov 2026 17:14:10 GMT",
+   "base": "2026-11-28T15:00Z",
+   "valid": "初期 28日15Z(+6h 28日21Z・+12h 29日03Z)",
+   "w": 2048,
+   "h": 2545,
+   "bytes": 147385
+  },
+  {
+   "id": "fxjp854",
+   "grp": "upper",
+   "title": "FXJP854 850hPa 相当温位・風 12〜48時間予想",
+   "lm": "Sat, 28 Nov 2026 15:36:41 GMT",
+   "base": "2026-11-28T12:00Z",
+   "valid": "初期 28日12Z(+12〜+48h: 29日00Z〜30日12Z)",
+   "w": 1311,
+   "h": 1505,
+   "bytes": 453332
+  }
+ ],
+ "refs": [
+  {
+   "id": "fbjp",
+   "title": "FBJP 国内悪天予想図",
+   "lm": "Sat, 28 Nov 2026 12:30:31 GMT",
+   "at": "2026-11-28T12:30Z",
+   "file": "ref_fbjp.png",
+   "src": "https://www.data.jma.go.jp/airinfo/data/pict/fbjp/fbjp.png",
+   "bytes": 227461
+  },
+  {
+   "id": "cmnt_air",
+   "title": "全国航空気象解説報(国内空域)",
+   "lm": "Fri, 27 Nov 2026 19:10:30 GMT",
+   "at": "2026-11-27T19:10Z",
+   "file": "ref_cmnt_air.png",
+   "src": "https://www.data.jma.go.jp/airinfo/data/pict/ajpn_cmnt/qyya82.png",
+   "bytes": 358569
+  },
+  {
+   "id": "cmnt_fir",
+   "title": "全国航空気象解説報(福岡FIR)",
+   "lm": "Sat, 28 Nov 2026 07:10:32 GMT",
+   "at": "2026-11-28T07:10Z",
+   "file": "ref_cmnt_fir.png",
+   "src": "https://www.data.jma.go.jp/airinfo/data/pict/ajpn_cmnt/qyya83.png",
+   "bytes": 396219
+  }
+ ],
+ "prev_refs": [
+  {
+   "id": "fbjp",
+   "title": "FBJP 国内悪天予想図",
+   "lm": "Sat, 28 Nov 2026 06:30:34 GMT",
+   "at": "2026-11-28T06:30Z",
+   "file": "ref_fbjp_prev.png",
+   "src": "https://www.data.jma.go.jp/airinfo/data/pict/fbjp/fbjp.png",
+   "bytes": 267175
+  }
+ ],
+ "made": "2026-11-28T17:24Z"
+}
